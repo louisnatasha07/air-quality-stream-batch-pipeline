@@ -31,15 +31,15 @@ The system integrates realtime environmental data from **Open-Meteo API** and hi
         │                                     │
         ▼                                     ▼
 
-┌─────────────────────┐           ┌─────────────────────┐
-│ Stream Processing    │           │ Batch Processing    │
-├─────────────────────┤           ├─────────────────────┤
-│ Kafka Producer       │           │ ETL Pipeline        │
-│ Kafka Consumer       │           │ Data Cleaning       │
-│ Realtime Analytics   │           │ Feature Engineering │
-│ Anomaly Detection    │           │ ML Training         │
-│ Alerting             │           │ Aggregation         │
-└──────────┬──────────┘           └──────────┬──────────┘
+┌──────────────────────┐           ┌──────────────────────┐
+│ Stream Processing    │           │ Batch Processing     │
+├──────────────────────┤           ├──────────────────────┤
+│ Kafka Producer       │           │ ETL Pipeline         │
+│ Kafka Consumer       │           │ Data Cleaning        │
+│ Realtime Analytics   │           │ Feature Engineering  │
+│ Anomaly Detection    │           │ ML Training          │
+│ Alerting             │           │ Aggregation          │
+└──────────┬───────────┘           └──────────┬───────────┘
            │                                 │
            └──────────────┬──────────────────┘
                           ▼
