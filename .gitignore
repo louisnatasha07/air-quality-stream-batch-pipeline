@@ -216,3 +216,31 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# =========================
+# Project Specific
+# =========================
+
+# Logs
+logs/
+
+# ML Models
+models/*.pkl
+models/*.joblib
+models/*.h5
+
+# Data files
+data/raw/
+data/processed/
+data/external/
+
+# Docker volumes
+docker-data/
+
+# Kafka temp
+tmp/
+temp/
+checkpoints/
+
+# PostgreSQL dump
+*.sql
