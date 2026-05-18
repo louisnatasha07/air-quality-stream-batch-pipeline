@@ -3,31 +3,26 @@ from pathlib import Path
 import cdsapi
 
 CITIES = [
-    {
-        "city": "Delhi",
-        "latitude": 28.6139,
-        "longitude": 77.2090
-    },
-    {
-        "city": "Bangkok",
-        "latitude": 13.7563,
-        "longitude": 100.5018
-    },
-    {
-        "city": "Jakarta",
-        "latitude": -6.2088,
-        "longitude": 106.8456
-    },
-    {
-        "city": "Beijing",
-        "latitude": 39.9042,
-        "longitude": 116.4074
-    },
-    {
-        "city": "Los Angeles",
-        "latitude": 34.0522,
-        "longitude": -118.2437
-    }
+    {"city": "Delhi", "latitude": 28.6139, "longitude": 77.2090},
+    {"city": "Bangkok", "latitude": 13.7563, "longitude": 100.5018},
+    {"city": "Jakarta", "latitude": -6.2088, "longitude": 106.8456},
+    {"city": "Beijing", "latitude": 39.9042, "longitude": 116.4074},
+    {"city": "Los Angeles", "latitude": 34.0522, "longitude": -118.2437},
+]
+
+MONTHS = [
+    ("2024", "09"),
+    ("2024", "10"),
+    ("2024", "11"),
+    ("2024", "12"),
+    ("2025", "01"),
+    ("2025", "02"),
+    ("2025", "03"),
+    ("2025", "04"),
+    ("2025", "05"),
+    ("2025", "06"),
+    ("2025", "07"),
+    ("2025", "08"),
 ]
 
 OUTPUT_DIR = Path("data/external/cams")
@@ -38,8 +33,6 @@ client = cdsapi.Client(
     key="648f0c61-e942-43d7-8386-b9834660a9e4"
 )
 
-YEAR = 2025
-
 for city in CITIES:
 
     city_name = city["city"].lower().replace(" ", "_")
@@ -47,21 +40,22 @@ for city in CITIES:
     lat = city["latitude"]
     lon = city["longitude"]
 
-    north = lat + 1
-    south = lat - 1
-    west = lon - 1
-    east = lon + 1
+    north = lat + 0.75
+    south = lat - 0.75
+    west = lon - 0.75
+    east = lon + 0.75
 
-    for month in range(1, 13):
+    for year, month in MONTHS:
 
-        start_date = f"{YEAR}-{month:02d}-01"
+        start_date = f"{year}-{month}-01"
 
-        end_day = monthrange(YEAR, month)[1]
-        end_date = f"{YEAR}-{month:02d}-{end_day}"
+        end_day = monthrange(int(year), int(month))[1]
+
+        end_date = f"{year}-{month}-{end_day}"
 
         output_file = (
             OUTPUT_DIR /
-            f"cams_{city_name}_{YEAR}_{month:02d}.nc"
+            f"cams_{city_name}_{year}_{month}.nc"
         )
 
         if output_file.exists():
@@ -74,34 +68,50 @@ for city in CITIES:
             f"{start_date} -> {end_date}"
         )
 
-        client.retrieve(
-            "cams-global-reanalysis-eac4",
-            {
-                "variable": [
-                    "particulate_matter_2.5um",
-                    "particulate_matter_10um",
-                ],
+        try:
 
-                "date": f"{start_date}/{end_date}",
+            client.retrieve(
+                "cams-global-reanalysis-eac4",
+                {
+                    "variable": [
+                        "particulate_matter_2.5um",
+                        "particulate_matter_10um",
+                    ],
 
-                "time": [
-                    "00:00",
-                    "06:00",
-                    "12:00",
-                    "18:00",
-                ],
+                    "date": f"{start_date}/{end_date}",
 
-                "data_format": "netcdf",
+                    "time": [
+                        "00:00",
+                        "06:00",
+                        "12:00",
+                        "18:00",
+                    ],
 
-                "area": [
-                    north,
-                    west,
-                    south,
-                    east
-                ],
-            },
+                    "data_format": "netcdf",
 
-            str(output_file)
-        )
+                    "area": [
+                        north,
+                        west,
+                        south,
+                        east
+                    ],
+                },
+
+                str(output_file)
+            )
+
+            print(f"Downloaded: {output_file}")
+
+        except Exception as e:
+
+            print(
+                f"Failed download "
+                f"{city['city']} "
+                f"{start_date}"
+            )
+
+            print(e)
+
+            continue
 
 print("All CAMS downloads completed.")

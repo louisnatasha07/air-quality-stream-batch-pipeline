@@ -29,8 +29,8 @@ CITIES = [
     }
 ]
 
-START_DATE = "2025-01-01"
-END_DATE = "2025-12-31"
+START_DATE = "2024-09-01"
+END_DATE = "2025-08-31"
 
 all_data = []
 

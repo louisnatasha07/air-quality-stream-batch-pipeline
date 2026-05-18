@@ -1,17 +1,36 @@
+from pathlib import Path
 import xarray as xr
 import pandas as pd
 
-# Load NetCDF file
-ds = xr.open_dataset("data/external/cams_delhi.nc")
+INPUT_DIR = Path("data/external/cams")
 
-print(ds)
+all_data = []
 
-# Convert to dataframe
-df = ds.to_dataframe().reset_index()
+for file_path in INPUT_DIR.glob("*.nc"):
 
-print(df.head())
+    print(f"Parsing {file_path.name}...")
 
-# Save raw CSV
-df.to_csv("data/raw/cams_delhi.csv", index=False)
+    parts = file_path.stem.split("_")
 
-print("CAMS data converted to CSV successfully.")
+    city = "_".join(parts[1:-2]).replace("_", " ").title()
+
+    ds = xr.open_dataset(file_path)
+
+    df = ds.to_dataframe().reset_index()
+
+    if "valid_time" in df.columns:
+        df = df.rename(columns={"valid_time": "time"})
+
+    df["city"] = city
+
+    all_data.append(df)
+
+final_df = pd.concat(all_data, ignore_index=True)
+
+final_df.to_csv(
+    "data/raw/cams_all_cities.csv",
+    index=False
+)
+
+print("CAMS parsing completed.")
+print(final_df.shape)

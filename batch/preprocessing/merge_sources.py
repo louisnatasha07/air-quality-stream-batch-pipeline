@@ -1,37 +1,35 @@
 import pandas as pd
 
-# Load Open-Meteo dataset
 openmeteo_df = pd.read_csv(
-    "data/processed/feature_dataset.csv"
+    "data/processed/openmeteo_clean.csv"
 )
 
-# Load CAMS dataset
 cams_df = pd.read_csv(
-    "data/processed/cams_delhi_clean.csv"
+    "data/processed/cams_clean.csv"
 )
 
-# Convert datetime
 openmeteo_df["time"] = pd.to_datetime(openmeteo_df["time"])
 cams_df["time"] = pd.to_datetime(cams_df["time"])
 
-print("Open-Meteo shape:", openmeteo_df.shape)
-print("CAMS shape:", cams_df.shape)
+openmeteo_df["time_6h"] = (
+    openmeteo_df["time"].dt.floor("6h")
+)
 
-# Merge by time
+cams_df["time_6h"] = cams_df["time"]
+
 merged_df = pd.merge(
     openmeteo_df,
-    cams_df,
-    on="time",
+    cams_df.drop(columns=["time"]),
+    on=["city", "time_6h"],
     how="inner"
 )
 
-print("Merged shape:", merged_df.shape)
-print(merged_df.head())
+merged_df = merged_df.drop(columns=["time_6h"])
 
-# Save merged dataset
 merged_df.to_csv(
-    "data/processed/merged_air_quality.csv",
+    "data/processed/final_multi_city_air_quality.csv",
     index=False
 )
 
-print("Merged dataset saved successfully.")
+print("Multi-city merge completed.")
+print(merged_df.shape)
