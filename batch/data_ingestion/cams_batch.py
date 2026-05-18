@@ -30,7 +30,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 client = cdsapi.Client(
     url="https://ads.atmosphere.copernicus.eu/api",
-    key="648f0c61-e942-43d7-8386-b9834660a9e4"
+    key="API_KEY_KAMU"
 )
 
 for city in CITIES:
