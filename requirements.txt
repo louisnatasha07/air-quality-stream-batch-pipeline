@@ -13,3 +13,6 @@ cdsapi
 xarray
 netcdf4
 scipy==1.11.4
+dagster
+dagster-webserver
+dagster-postgres

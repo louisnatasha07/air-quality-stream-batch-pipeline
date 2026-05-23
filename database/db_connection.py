@@ -8,8 +8,8 @@ load_dotenv(BASE_DIR / ".env")
 
 DB_USER = os.getenv("POSTGRES_USER")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD")
-DB_HOST = os.getenv("POSTGRES_HOST")
-DB_PORT = os.getenv("POSTGRES_PORT")
+DB_HOST = os.getenv("POSTGRES_HOST", os.getenv("DATABASE_HOST", "localhost"))
+DB_PORT = os.getenv("POSTGRES_PORT", os.getenv("DATABASE_PORT", "5432"))
 DB_NAME = os.getenv("POSTGRES_DB")
 
 print("DB_USER:", DB_USER)

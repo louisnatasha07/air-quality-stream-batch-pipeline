@@ -244,3 +244,19 @@ checkpoints/
 
 # PostgreSQL dump
 *.sql
+
+# Dagster
+dagster_home/
+
+# Docker
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep folder structure
+!data/.gitkeep
+!logs/.gitkeep
+!models/.gitkeep

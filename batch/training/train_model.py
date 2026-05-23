@@ -1,5 +1,7 @@
+from pathlib import Path
 import pandas as pd
 import joblib
+import logging
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -9,63 +11,107 @@ from sklearn.metrics import (
     r2_score
 )
 
-df = pd.read_csv(
-    "data/processed/final_multi_city_air_quality.csv"
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    filename="logs/pipeline.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-df = df.dropna()
+logging.info("Model training started")
 
-features = [
-    "pm10",
-    "carbon_monoxide",
-    "nitrogen_dioxide",
-    "ozone",
-    "hour",
-    "day",
-    "month",
-    "day_of_week",
-    "pm2_5_rolling_3h",
-    "cams_pm2_5",
-    "cams_pm10"
-]
+try:
 
-X = df[features]
+    INPUT_FILE = Path("data/processed/cams_feature_dataset.csv")
+    MODEL_DIR = Path("models")
+    MODEL_FILE = MODEL_DIR / "trained_model.pkl"
 
-y = df["pm2_5"]
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.2,
-    random_state=42
-)
+    logging.info(
+        f"Loading feature dataset from {INPUT_FILE}"
+    )
 
-model = RandomForestRegressor(
-    n_estimators=150,
-    random_state=42
-)
+    df = pd.read_csv(INPUT_FILE)
 
-model.fit(X_train, y_train)
+    logging.info(
+        f"Dataset loaded with shape {df.shape}"
+    )
 
-predictions = model.predict(X_test)
+    df = df.dropna()
 
-mae = mean_absolute_error(y_test, predictions)
+    features = [
+        "cams_pm10",
+        "hour",
+        "day",
+        "month",
+        "day_of_week",
+        "pm2_5_rolling_3h",
+        "pm10_rolling_3h",
+        "pm2_5_lag_1",
+        "pm10_lag_1",
+    ]
 
-mse = mean_squared_error(y_test, predictions)
+    target = "cams_pm2_5"
 
-rmse = mse ** 0.5
+    X = df[features]
+    y = df[target]
 
-r2 = r2_score(y_test, predictions)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42
+    )
 
-print("Model Evaluation")
-print("MAE:", mae)
-print("MSE:", mse)
-print("RMSE:", rmse)
-print("R2:", r2)
+    logging.info(
+        f"Train shape: {X_train.shape}, Test shape: {X_test.shape}"
+    )
 
-joblib.dump(
-    model,
-    "models/trained_model.pkl"
-)
+    model = RandomForestRegressor(
+        n_estimators=150,
+        random_state=42
+    )
 
-print("Model training completed.")
+    logging.info("RandomForest model training started")
+
+    model.fit(X_train, y_train)
+
+    logging.info("Model training completed")
+
+    predictions = model.predict(X_test)
+
+    mae = mean_absolute_error(y_test, predictions)
+    mse = mean_squared_error(y_test, predictions)
+    rmse = mse ** 0.5
+    r2 = r2_score(y_test, predictions)
+
+    logging.info(f"MAE: {mae}")
+    logging.info(f"MSE: {mse}")
+    logging.info(f"RMSE: {rmse}")
+    logging.info(f"R2: {r2}")
+
+    print("Model Evaluation")
+    print("MAE:", mae)
+    print("MSE:", mse)
+    print("RMSE:", rmse)
+    print("R2:", r2)
+
+    joblib.dump(model, MODEL_FILE)
+
+    logging.info(
+        f"Model saved to {MODEL_FILE}"
+    )
+
+    print(f"Model saved to {MODEL_FILE}")
+    print("Model training completed.")
+
+except Exception as e:
+
+    logging.error("Model training failed")
+
+    logging.exception(e)
+
+    raise
