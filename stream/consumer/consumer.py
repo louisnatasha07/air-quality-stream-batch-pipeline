@@ -1,8 +1,29 @@
 import json
 import os
+import sys
+from pathlib import Path
 import psycopg2
 from dotenv import load_dotenv
 from kafka import KafkaConsumer
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# Add project root to path for imports
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Import Telegram alerter with error handling
+try:
+    from stream.alerting.telegram_alert import alerter
+    TELEGRAM_ENABLED = True
+except Exception as e:
+    print(f"[WARNING] Telegram alert disabled: {e}")
+    TELEGRAM_ENABLED = False
+    alerter = None
 
 # --- SYSTEM INITIALIZATION ---
 load_dotenv()
@@ -32,11 +53,11 @@ def sync_to_inventory(cursor, payload, is_anomaly, reason):
     """Menyimpan data hasil tangkapan ke dalam tabel PostgreSQL."""
     insert_query = """
         INSERT INTO air_quality_stream 
-        (timestamp, latitude, longitude, pm25, pm10, carbon_monoxide, nitrogen_dioxide, sulphur_dioxide, ozone, aqi, is_anomaly, anomaly_reason)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        (timestamp, city, latitude, longitude, pm25, pm10, carbon_monoxide, nitrogen_dioxide, sulphur_dioxide, ozone, aqi, is_anomaly, anomaly_reason)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
     record = (
-        payload['timestamp'], payload['latitude'], payload['longitude'],
+        payload['timestamp'], payload.get('city', 'Unknown'), payload['latitude'], payload['longitude'],
         payload['pm25'], payload['pm10'], payload['carbon_monoxide'],
         payload['nitrogen_dioxide'], payload['sulphur_dioxide'], payload['ozone'],
         payload['aqi'], is_anomaly, reason
@@ -81,8 +102,13 @@ def main():
             sync_to_inventory(cursor, payload, is_anomaly, reason)
             
             # Status log
+            city = payload.get('city', 'Unknown')
             status_tag = "[! ANOMALI !]" if is_anomaly else "[NORMAL]"
-            print(f"[{payload['timestamp']}] Tangkapan {status_tag} -> Tersimpan di database.")
+            print(f"[{city:15}] {status_tag} PM2.5: {payload.get('pm25', 0):.1f} | AQI: {payload.get('aqi', 0)} -> DB")
+            
+            # Kirim Telegram alert jika anomali terdeteksi
+            if is_anomaly and TELEGRAM_ENABLED and alerter:
+                alerter.send_anomaly_alert(payload, reason)
             
     except KeyboardInterrupt:
         print("\n[SYSTEM SHUTDOWN] Memutus uplink...")
