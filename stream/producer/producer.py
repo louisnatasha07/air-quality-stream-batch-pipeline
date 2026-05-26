@@ -70,7 +70,7 @@ def main():
             print(f"[PAYLOAD SENT] Waktu: {payload['timestamp']} | PM2.5: {payload['pm25']} | AQI: {payload['aqi']}")
         
         # Cooldown skill sebelum scouting berikutnya (10 detik)
-        time.sleep(10)
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()
