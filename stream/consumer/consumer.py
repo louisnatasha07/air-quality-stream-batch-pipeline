@@ -32,7 +32,8 @@ load_dotenv()
 
 KAFKA_SERVER = os.getenv('KAFKA_BOOTSTRAP_SERVER', 'localhost:9092')
 TOPIC_NAME = 'air_quality_stream'
-BATCH_INTERVAL = 60  # Send batch summary setiap 60 detik
+CONSUMER_GROUP = 'air_quality_consumer_group'  # Prevent duplicate consumers
+BATCH_INTERVAL = 30  # Send batch summary setiap 30 detik
 
 # Loadout koneksi ke base camp PostgreSQL
 DB_HOST = os.getenv('POSTGRES_HOST', 'localhost')
@@ -96,6 +97,7 @@ def main():
     consumer = KafkaConsumer(
         TOPIC_NAME,
         bootstrap_servers=KAFKA_SERVER,
+        group_id=CONSUMER_GROUP,  # Important: prevent duplicate reads
         auto_offset_reset='latest',
         enable_auto_commit=True,
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))

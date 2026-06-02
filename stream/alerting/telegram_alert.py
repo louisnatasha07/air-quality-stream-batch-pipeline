@@ -32,6 +32,7 @@ class TelegramAlerter:
         self.chat_id = chat_id or TELEGRAM_CHAT_ID
         self.enabled = bool(self.bot_token and self.chat_id)
         self.batch_buffer = []  # Buffer untuk mengumpulkan data sebelum kirim
+        self.seen_keys = set()  # Track unique city+timestamp untuk deduplikasi
         
         if not self.enabled:
             print("[TELEGRAM ALERT] Disabled - Bot token atau chat ID tidak ditemukan")
@@ -41,6 +42,7 @@ class TelegramAlerter:
     def add_to_batch(self, payload: Dict, anomaly_reason: str):
         """
         Tambahkan data ke batch buffer (tidak langsung kirim)
+        Automatically deduplicate by city + timestamp
         
         Args:
             payload: Data air quality
@@ -49,11 +51,19 @@ class TelegramAlerter:
         if not self.enabled:
             return
         
-        self.batch_buffer.append({
-            'payload': payload,
-            'reason': anomaly_reason,
-            'is_anomaly': anomaly_reason != "Normal"
-        })
+        # Create unique key for deduplication
+        city = payload.get('city', 'Unknown')
+        timestamp = payload.get('timestamp', '')
+        unique_key = f"{city}_{timestamp}"
+        
+        # Only add if not already in batch (deduplicate)
+        if unique_key not in self.seen_keys:
+            self.batch_buffer.append({
+                'payload': payload,
+                'reason': anomaly_reason,
+                'is_anomaly': anomaly_reason != "Normal"
+            })
+            self.seen_keys.add(unique_key)
     
     def send_batch_summary(self) -> bool:
         """
@@ -71,8 +81,9 @@ class TelegramAlerter:
         # Kirim ke Telegram
         success = self._send_message(message)
         
-        # Clear buffer setelah kirim
+        # Clear buffer dan seen keys setelah kirim
         self.batch_buffer.clear()
+        self.seen_keys.clear()
         
         return success
     
@@ -157,8 +168,8 @@ class TelegramAlerter:
         total = len(self.batch_buffer)
         
         lines = [
-            f"*AIR QUALITY MONITORING UPDATE*",
-            f"Time: {timestamp} | Total: {total} cities",
+            f"*AIR QUALITY UPDATE*",
+            f"{timestamp} | {total} cities monitored",
             ""
         ]
         
@@ -166,32 +177,31 @@ class TelegramAlerter:
         for category, cities in sorted_categories:
             count = len(cities)
             
-            # Category header with minimal indicator
+            # Category header with severity indicator
             if category == "HAZARDOUS":
-                header = f"HAZARDOUS ({count})"
+                header = f"[!!] *{category}* ({count})"
             elif category == "UNHEALTHY":
-                header = f"UNHEALTHY ({count})"
+                header = f"[!] *{category}* ({count})"
             elif category == "MODERATE":
-                header = f"MODERATE ({count})"
+                header = f"[~] *{category}* ({count})"
             else:
-                header = f"GOOD ({count})"
+                header = f"[✓] *{category}* ({count})"
             
-            lines.append(f"*{header}*")
+            lines.append(header)
             
             # Sort cities by PM2.5 descending
             cities.sort(key=lambda x: x['pm25'], reverse=True)
             
-            # Add city details
+            # Add city details (cleaner format)
             for city_data in cities:
-                city_name = city_data['city'][:15].ljust(15)  # Truncate & pad for alignment
+                city_name = city_data['city']
                 pm25_val = city_data['pm25']
                 aqi_val = city_data['aqi']
-                lines.append(f"  {city_name} PM2.5: {pm25_val:5.1f}  AQI: {aqi_val:3.0f}")
+                lines.append(f"  {city_name}: PM2.5 {pm25_val:.1f} | AQI {aqi_val:.0f}")
             
             lines.append("")  # Empty line between categories
         
         # Footer
-        lines.append("─" * 35)
         lines.append("Stream monitoring active")
         
         return "\n".join(lines)
