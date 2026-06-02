@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 import psycopg2
 import time
-import threading
 from dotenv import load_dotenv
 from kafka import KafkaConsumer
 
@@ -33,7 +32,8 @@ load_dotenv()
 KAFKA_SERVER = os.getenv('KAFKA_BOOTSTRAP_SERVER', 'localhost:9092')
 TOPIC_NAME = 'air_quality_stream'
 CONSUMER_GROUP = 'air_quality_consumer_group'  # Prevent duplicate consumers
-BATCH_INTERVAL = 30  # Send batch summary setiap 30 detik
+EXPECTED_CITIES = 4  # Jumlah cities yang di-pull producer per cycle
+MESSAGE_TIMEOUT = 10  # Timeout untuk tunggu semua cities (detik)
 
 # Loadout koneksi ke base camp PostgreSQL
 DB_HOST = os.getenv('POSTGRES_HOST', 'localhost')
@@ -68,16 +68,6 @@ def sync_to_inventory(cursor, payload, is_anomaly, reason):
     )
     cursor.execute(insert_query, record)
 
-def send_telegram_batch():
-    """
-    Background thread untuk mengirim batch summary secara periodik
-    """
-    while True:
-        time.sleep(BATCH_INTERVAL)
-        if TELEGRAM_ENABLED and alerter:
-            alerter.send_batch_summary()
-            print(f"\n[TELEGRAM] Batch summary sent ({BATCH_INTERVAL}s interval)\n")
-
 def main():
     print("[SYSTEM BOOTING] Mengaktifkan Interceptor Consumer...")
     
@@ -100,36 +90,56 @@ def main():
         group_id=CONSUMER_GROUP,  # Important: prevent duplicate reads
         auto_offset_reset='latest',
         enable_auto_commit=True,
+        consumer_timeout_ms=MESSAGE_TIMEOUT * 1000,  # Timeout untuk batch detection
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
     
-    # 3. Start background thread untuk batch notification
-    if TELEGRAM_ENABLED:
-        telegram_thread = threading.Thread(target=send_telegram_batch, daemon=True)
-        telegram_thread.start()
-        print(f"[TELEGRAM] Batch notification active (interval: {BATCH_INTERVAL}s)")
-    
-    print(f"[INTERCEPTOR STANDBY] Menunggu aliran data di topic: {TOPIC_NAME}...\n")
+    print(f"[INTERCEPTOR STANDBY] Menunggu aliran data di topic: {TOPIC_NAME}...")
+    print(f"[STRATEGY] Event-based notification - kirim setiap {EXPECTED_CITIES} cities processed\n")
 
-    # 4. Looping intercept data (Endless Grind)
+    # 3. Looping intercept data (Endless Grind)
+    cycle_count = 0
     try:
-        for message in consumer:
-            payload = message.value
+        while True:
+            batch_start_time = time.time()
+            messages_in_batch = 0
             
-            # Cek status debuff
-            is_anomaly, reason = check_anomaly(payload)
+            # Collect messages sampai timeout atau dapat EXPECTED_CITIES
+            for message in consumer:
+                payload = message.value
+                
+                # Cek status debuff
+                is_anomaly, reason = check_anomaly(payload)
+                
+                # Eksekusi sinkronisasi
+                sync_to_inventory(cursor, payload, is_anomaly, reason)
+                
+                # Status log
+                city = payload.get('city', 'Unknown')
+                status_tag = "[! ANOMALI !]" if is_anomaly else "[NORMAL]"
+                print(f"[{city:15}] {status_tag} PM2.5: {payload.get('pm25', 0):.1f} | AQI: {payload.get('aqi', 0)} -> DB")
+                
+                # Tambahkan ke batch buffer (tidak langsung kirim)
+                if TELEGRAM_ENABLED and alerter:
+                    alerter.add_to_batch(payload, reason)
+                
+                messages_in_batch += 1
+                
+                # Kalau sudah dapat EXPECTED_CITIES, kirim notif
+                if messages_in_batch >= EXPECTED_CITIES:
+                    break
             
-            # Eksekusi sinkronisasi
-            sync_to_inventory(cursor, payload, is_anomaly, reason)
-            
-            # Status log
-            city = payload.get('city', 'Unknown')
-            status_tag = "[! ANOMALI !]" if is_anomaly else "[NORMAL]"
-            print(f"[{city:15}] {status_tag} PM2.5: {payload.get('pm25', 0):.1f} | AQI: {payload.get('aqi', 0)} -> DB")
-            
-            # Tambahkan ke batch buffer (tidak langsung kirim)
-            if TELEGRAM_ENABLED and alerter:
-                alerter.add_to_batch(payload, reason)
+            # Kirim batch notification setelah dapat semua cities
+            if messages_in_batch > 0:
+                cycle_count += 1
+                elapsed = time.time() - batch_start_time
+                print(f"\n[CYCLE #{cycle_count}] Processed {messages_in_batch} cities in {elapsed:.2f}s")
+                
+                if TELEGRAM_ENABLED and alerter:
+                    alerter.send_batch_summary()
+                    print(f"[TELEGRAM] Notification sent for cycle #{cycle_count}\n")
+                else:
+                    print()
             
     except KeyboardInterrupt:
         print("\n[SYSTEM SHUTDOWN] Memutus uplink...")
