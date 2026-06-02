@@ -6,7 +6,8 @@ Mengirim notifikasi real-time ke Telegram saat terdeteksi anomali
 import os
 import requests
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,15 +31,55 @@ class TelegramAlerter:
         self.bot_token = bot_token or TELEGRAM_BOT_TOKEN
         self.chat_id = chat_id or TELEGRAM_CHAT_ID
         self.enabled = bool(self.bot_token and self.chat_id)
+        self.batch_buffer = []  # Buffer untuk mengumpulkan data sebelum kirim
         
         if not self.enabled:
             print("[TELEGRAM ALERT] Disabled - Bot token atau chat ID tidak ditemukan")
         else:
             print(f"[TELEGRAM ALERT] Enabled - Chat ID: {self.chat_id}")
     
+    def add_to_batch(self, payload: Dict, anomaly_reason: str):
+        """
+        Tambahkan data ke batch buffer (tidak langsung kirim)
+        
+        Args:
+            payload: Data air quality
+            anomaly_reason: Alasan anomaly jika ada
+        """
+        if not self.enabled:
+            return
+        
+        self.batch_buffer.append({
+            'payload': payload,
+            'reason': anomaly_reason,
+            'is_anomaly': anomaly_reason != "Normal"
+        })
+    
+    def send_batch_summary(self) -> bool:
+        """
+        Kirim summary dari semua data yang dikumpulkan dalam batch
+        
+        Returns:
+            True jika berhasil kirim, False jika gagal
+        """
+        if not self.enabled or not self.batch_buffer:
+            return False
+        
+        # Format pesan summary
+        message = self._format_batch_summary()
+        
+        # Kirim ke Telegram
+        success = self._send_message(message)
+        
+        # Clear buffer setelah kirim
+        self.batch_buffer.clear()
+        
+        return success
+    
     def send_anomaly_alert(self, payload: Dict, anomaly_reason: str) -> bool:
         """
-        Kirim alert anomali ke Telegram
+        [DEPRECATED] Kirim alert individual (kept for backward compatibility)
+        Gunakan add_to_batch() + send_batch_summary() untuk batch notification
         
         Args:
             payload: Data air quality yang terdeteksi anomali
@@ -69,9 +110,95 @@ class TelegramAlerter:
         message = self._format_summary_message(stats)
         return self._send_message(message)
     
+    def _categorize_aqi(self, aqi: int, pm25: float) -> tuple:
+        """
+        Kategorikan AQI ke severity level
+        Returns: (category_name, priority_order)
+        """
+        if aqi > 200 or pm25 > 150:
+            return ("HAZARDOUS", 0)
+        elif aqi > 150 or pm25 > 100:
+            return ("UNHEALTHY", 1)
+        elif aqi > 100 or pm25 > 50:
+            return ("MODERATE", 2)
+        else:
+            return ("GOOD", 3)
+    
+    def _format_batch_summary(self) -> str:
+        """
+        Format pesan summary batch - clean & professional
+        """
+        if not self.batch_buffer:
+            return ""
+        
+        # Group by severity
+        groups = defaultdict(list)
+        
+        for item in self.batch_buffer:
+            payload = item['payload']
+            aqi = payload.get('aqi', 0)
+            pm25 = payload.get('pm25', 0)
+            city = payload.get('city', 'Unknown')
+            
+            category, priority = self._categorize_aqi(aqi, pm25)
+            
+            groups[category].append({
+                'city': city,
+                'pm25': pm25,
+                'aqi': aqi,
+                'priority': priority
+            })
+        
+        # Sort categories by priority
+        sorted_categories = sorted(groups.items(), key=lambda x: groups[x[0]][0]['priority'])
+        
+        # Build message
+        timestamp = datetime.now().strftime('%H:%M WIB')
+        total = len(self.batch_buffer)
+        
+        lines = [
+            f"*AIR QUALITY MONITORING UPDATE*",
+            f"Time: {timestamp} | Total: {total} cities",
+            ""
+        ]
+        
+        # Add each category
+        for category, cities in sorted_categories:
+            count = len(cities)
+            
+            # Category header with minimal indicator
+            if category == "HAZARDOUS":
+                header = f"HAZARDOUS ({count})"
+            elif category == "UNHEALTHY":
+                header = f"UNHEALTHY ({count})"
+            elif category == "MODERATE":
+                header = f"MODERATE ({count})"
+            else:
+                header = f"GOOD ({count})"
+            
+            lines.append(f"*{header}*")
+            
+            # Sort cities by PM2.5 descending
+            cities.sort(key=lambda x: x['pm25'], reverse=True)
+            
+            # Add city details
+            for city_data in cities:
+                city_name = city_data['city'][:15].ljust(15)  # Truncate & pad for alignment
+                pm25_val = city_data['pm25']
+                aqi_val = city_data['aqi']
+                lines.append(f"  {city_name} PM2.5: {pm25_val:5.1f}  AQI: {aqi_val:3.0f}")
+            
+            lines.append("")  # Empty line between categories
+        
+        # Footer
+        lines.append("─" * 35)
+        lines.append("Stream monitoring active")
+        
+        return "\n".join(lines)
+    
     def _format_alert_message(self, payload: Dict, reason: str) -> str:
         """
-        Format pesan alert dengan emoji dan struktur yang jelas
+        Format pesan alert individual (untuk backward compatibility)
         """
         timestamp = payload.get('timestamp', datetime.now().isoformat())
         city = payload.get('city', 'Unknown')
@@ -79,33 +206,19 @@ class TelegramAlerter:
         aqi = payload.get('aqi', 0)
         
         # Tentukan severity level
-        if aqi > 200 or pm25 > 100:
-            severity = "🔴 CRITICAL"
-        elif aqi > 150 or pm25 > 75:
-            severity = "🟠 HIGH"
-        else:
-            severity = "🟡 MODERATE"
+        category, _ = self._categorize_aqi(aqi, pm25)
         
         message = f"""
-🚨 *AIR QUALITY ANOMALY DETECTED*
+*AIR QUALITY ALERT*
 
-{severity}
+Status: {category}
+Location: {city}
+Time: {timestamp}
 
-📍 *Lokasi:* {city}
-🕐 *Waktu:* {timestamp}
+PM2.5: {pm25:.1f} μg/m³
+AQI: {aqi}
 
-📊 *Metrics:*
-• PM2.5: {pm25:.1f} μg/m³
-• AQI: {aqi}
-• CO: {payload.get('carbon_monoxide', 0):.0f} μg/m³
-• NO₂: {payload.get('nitrogen_dioxide', 0):.1f} μg/m³
-• O₃: {payload.get('ozone', 0):.1f} μg/m³
-
-⚠️ *Alasan:*
-{reason}
-
-💡 *Rekomendasi:*
-{"Hindari aktivitas outdoor" if aqi > 150 else "Gunakan masker jika keluar"}
+Reason: {reason}
 """
         return message
     
@@ -114,18 +227,18 @@ class TelegramAlerter:
         Format pesan summary harian
         """
         message = f"""
-📊 *Daily Air Quality Summary*
+*DAILY AIR QUALITY SUMMARY*
 
-🕐 *Tanggal:* {datetime.now().strftime('%Y-%m-%d')}
+Date: {datetime.now().strftime('%Y-%m-%d')}
 
-📈 *Statistik PM2.5:*
-• Rata-rata: {stats.get('pm25_mean', 0):.1f} μg/m³
-• Min: {stats.get('pm25_min', 0):.1f} μg/m³
-• Max: {stats.get('pm25_max', 0):.1f} μg/m³
+PM2.5 Statistics:
+  Average: {stats.get('pm25_mean', 0):.1f} μg/m³
+  Min: {stats.get('pm25_min', 0):.1f} μg/m³
+  Max: {stats.get('pm25_max', 0):.1f} μg/m³
 
-🚨 *Anomali Terdeteksi:* {stats.get('anomaly_count', 0)} kali
+Anomalies Detected: {stats.get('anomaly_count', 0)}
 
-✅ *Status:* Monitoring aktif
+Status: Monitoring active
 """
         return message
     
@@ -163,7 +276,7 @@ class TelegramAlerter:
             print("[TELEGRAM] Bot tidak aktif - token/chat_id tidak ada")
             return False
         
-        test_message = "🤖 Telegram Alert System - Test Connection\n\nBot berhasil terhubung!"
+        test_message = "*TELEGRAM ALERT SYSTEM*\n\nConnection test successful\nBot is online and ready"
         return self._send_message(test_message)
 
 
@@ -179,24 +292,39 @@ if __name__ == "__main__":
     if alerter.test_connection():
         print("✅ Telegram bot berhasil terhubung!")
         
-        # Test anomaly alert
-        test_payload = {
-            "timestamp": datetime.now().isoformat(),
-            "latitude": -7.5561,
-            "longitude": 110.8317,
-            "pm25": 75.5,
-            "pm10": 120.0,
-            "carbon_monoxide": 8500,
-            "nitrogen_dioxide": 45.2,
-            "sulphur_dioxide": 12.3,
-            "ozone": 85.1,
-            "aqi": 125
-        }
+        # Test batch summary dengan multiple cities
+        test_cities = [
+            {"city": "Jakarta", "pm25": 165.5, "aqi": 210, "timestamp": datetime.now().isoformat()},
+            {"city": "Bandung", "pm25": 75.2, "aqi": 125, "timestamp": datetime.now().isoformat()},
+            {"city": "Surabaya", "pm25": 155.0, "aqi": 195, "timestamp": datetime.now().isoformat()},
+            {"city": "Yogyakarta", "pm25": 45.0, "aqi": 85, "timestamp": datetime.now().isoformat()},
+            {"city": "Semarang", "pm25": 38.5, "aqi": 70, "timestamp": datetime.now().isoformat()},
+            {"city": "Medan", "pm25": 92.0, "aqi": 145, "timestamp": datetime.now().isoformat()},
+        ]
         
-        alerter.send_anomaly_alert(
-            test_payload,
-            "PM2.5 tinggi (75.5 μg/m³) | AQI tidak sehat (125)"
-        )
+        # Add to batch
+        for city_data in test_cities:
+            is_anomaly = city_data['pm25'] > 50
+            reason = f"PM2.5: {city_data['pm25']}, AQI: {city_data['aqi']}" if is_anomaly else "Normal"
+            
+            # Fill remaining fields
+            city_data.update({
+                "latitude": -7.5,
+                "longitude": 110.8,
+                "pm10": 120.0,
+                "carbon_monoxide": 8500,
+                "nitrogen_dioxide": 45.2,
+                "sulphur_dioxide": 12.3,
+                "ozone": 85.1,
+            })
+            
+            alerter.add_to_batch(city_data, reason)
+        
+        # Send batch summary
+        print("\nSending batch summary...")
+        alerter.send_batch_summary()
+        print("✅ Batch summary sent!")
+        
     else:
         print("❌ Telegram bot gagal terhubung")
         print("Pastikan TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID sudah diset di .env")

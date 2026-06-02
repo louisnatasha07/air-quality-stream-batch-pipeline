@@ -3,6 +3,8 @@ import os
 import sys
 from pathlib import Path
 import psycopg2
+import time
+import threading
 from dotenv import load_dotenv
 from kafka import KafkaConsumer
 
@@ -30,6 +32,7 @@ load_dotenv()
 
 KAFKA_SERVER = os.getenv('KAFKA_BOOTSTRAP_SERVER', 'localhost:9092')
 TOPIC_NAME = 'air_quality_stream'
+BATCH_INTERVAL = 60  # Send batch summary setiap 60 detik
 
 # Loadout koneksi ke base camp PostgreSQL
 DB_HOST = os.getenv('POSTGRES_HOST', 'localhost')
@@ -64,6 +67,16 @@ def sync_to_inventory(cursor, payload, is_anomaly, reason):
     )
     cursor.execute(insert_query, record)
 
+def send_telegram_batch():
+    """
+    Background thread untuk mengirim batch summary secara periodik
+    """
+    while True:
+        time.sleep(BATCH_INTERVAL)
+        if TELEGRAM_ENABLED and alerter:
+            alerter.send_batch_summary()
+            print(f"\n[TELEGRAM] Batch summary sent ({BATCH_INTERVAL}s interval)\n")
+
 def main():
     print("[SYSTEM BOOTING] Mengaktifkan Interceptor Consumer...")
     
@@ -88,9 +101,15 @@ def main():
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
     
+    # 3. Start background thread untuk batch notification
+    if TELEGRAM_ENABLED:
+        telegram_thread = threading.Thread(target=send_telegram_batch, daemon=True)
+        telegram_thread.start()
+        print(f"[TELEGRAM] Batch notification active (interval: {BATCH_INTERVAL}s)")
+    
     print(f"[INTERCEPTOR STANDBY] Menunggu aliran data di topic: {TOPIC_NAME}...\n")
 
-    # 3. Looping intercept data (Endless Grind)
+    # 4. Looping intercept data (Endless Grind)
     try:
         for message in consumer:
             payload = message.value
@@ -106,13 +125,16 @@ def main():
             status_tag = "[! ANOMALI !]" if is_anomaly else "[NORMAL]"
             print(f"[{city:15}] {status_tag} PM2.5: {payload.get('pm25', 0):.1f} | AQI: {payload.get('aqi', 0)} -> DB")
             
-            # Kirim Telegram alert jika anomali terdeteksi
-            if is_anomaly and TELEGRAM_ENABLED and alerter:
-                alerter.send_anomaly_alert(payload, reason)
+            # Tambahkan ke batch buffer (tidak langsung kirim)
+            if TELEGRAM_ENABLED and alerter:
+                alerter.add_to_batch(payload, reason)
             
     except KeyboardInterrupt:
         print("\n[SYSTEM SHUTDOWN] Memutus uplink...")
     finally:
+        # Send remaining batch before shutdown
+        if TELEGRAM_ENABLED and alerter:
+            alerter.send_batch_summary()
         cursor.close()
         conn.close()
 
