@@ -245,6 +245,7 @@ checkpoints/
 # PostgreSQL dump
 *.sql
 
+<<<<<<< HEAD
 # Dagster
 dagster_home/
 
@@ -260,3 +261,6 @@ Thumbs.db
 !data/.gitkeep
 !logs/.gitkeep
 !models/.gitkeep
+=======
+# Model trained
+models/trained_model.pkl

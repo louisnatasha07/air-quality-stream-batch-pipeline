@@ -2,6 +2,7 @@ from pathlib import Path
 import pandas as pd
 import joblib
 import logging
+import json
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -87,6 +88,24 @@ try:
     mse = mean_squared_error(y_test, predictions)
     rmse = mse ** 0.5
     r2 = r2_score(y_test, predictions)
+    
+    metrics = {
+        "mae": mae,
+        "mse": mse,
+        "rmse": rmse,
+        "r2": r2,
+        "train_rows": int(X_train.shape[0]),
+        "test_rows": int(X_test.shape[0]),
+        "features": features,
+        "target": target,
+        }
+    
+    METRICS_FILE = MODEL_DIR / "model_metrics.json"
+    
+    with open(METRICS_FILE, "w") as f:
+        json.dump(metrics, f, indent=4)
+        
+    logging.info(f"Model metrics saved to {METRICS_FILE}")
 
     logging.info(f"MAE: {mae}")
     logging.info(f"MSE: {mse}")

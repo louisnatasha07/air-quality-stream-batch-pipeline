@@ -48,8 +48,13 @@ try:
         "pm2p5": "cams_pm2_5",
         "pm10": "cams_pm10",
     })
+    
+    for col in ["cams_pm2_5", "cams_pm10"]:
+        if col in cams_clean.columns:
+            cams_clean[col] = cams_clean[col] * 1_000_000_000
 
-    OUTPUT_FILE = "data/processed/cams_clean.csv"
+    OUTPUT_FILE = Path("data/processed/cams_clean.csv")
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     cams_clean.to_csv(
         OUTPUT_FILE,

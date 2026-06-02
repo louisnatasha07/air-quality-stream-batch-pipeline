@@ -16,6 +16,13 @@ logging.info("CAMS parsing started")
 
 INPUT_DIR = Path("data/external/cams")
 
+ALLOWED_CITIES = {
+    "Jakarta",
+    "Surakarta",
+    "Kuala Lumpur",
+    "Singapore",
+}
+
 all_data = []
 
 for file_path in INPUT_DIR.glob("*.nc"):
@@ -29,6 +36,12 @@ for file_path in INPUT_DIR.glob("*.nc"):
         parts = file_path.stem.split("_")
 
         city = "_".join(parts[1:-2]).replace("_", " ").title()
+        
+        if city not in ALLOWED_CITIES:
+            message = f"Skipping non-target city file: {file_path.name}"
+            print(message)
+            logging.info(message)
+            continue
 
         ds = xr.open_dataset(file_path)
 
@@ -57,7 +70,8 @@ for file_path in INPUT_DIR.glob("*.nc"):
 
 final_df = pd.concat(all_data, ignore_index=True)
 
-OUTPUT_FILE = "data/raw/cams_all_cities.csv"
+OUTPUT_FILE = Path("data/raw/cams_all_cities.csv")
+OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 final_df.to_csv(
     OUTPUT_FILE,

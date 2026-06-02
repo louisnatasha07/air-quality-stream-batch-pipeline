@@ -26,14 +26,19 @@ CITIES = [
         "longitude": 106.8456
     },
     {
-        "city": "Singapore",
-        "latitude": 1.3521,
-        "longitude": 103.8198
+        "city": "Surakarta",
+        "latitude": -7.5755,
+        "longitude": 110.8243
     },
     {
         "city": "Kuala Lumpur",
         "latitude": 3.1390,
         "longitude": 101.6869
+    },
+    {
+        "city": "Singapore",
+        "latitude": 1.3521,
+        "longitude": 103.8198
     },
 ]
 

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.0
@@ -43,15 +41,14 @@ services:
     command: dagster dev -h 0.0.0.0 -p 3000 -m orchestration.dagster.definitions
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres_db
+      POSTGRES_PORT: 5432
       DATABASE_HOST: postgres_db
       DATABASE_PORT: 5432
       DAGSTER_HOME: /opt/dagster/dagster_home
-      CAMS_API_URL: ${CAMS_API_URL}
-      CAMS_API_KEY: ${CAMS_API_KEY}
     volumes:
       - .:/app
       - dagster_home:/opt/dagster/dagster_home
@@ -62,21 +59,36 @@ services:
     build: .
     container_name: dagster_daemon
     command: dagster-daemon run
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres_db
+      POSTGRES_PORT: 5432
       DATABASE_HOST: postgres_db
       DATABASE_PORT: 5432
       DAGSTER_HOME: /opt/dagster/dagster_home
-      CAMS_API_URL: ${CAMS_API_URL}
-      CAMS_API_KEY: ${CAMS_API_KEY}
     volumes:
       - .:/app
       - dagster_home:/opt/dagster/dagster_home
     depends_on:
       - postgres
       - dagster-webserver
+
+  dashboard:
+    build: .
+    container_name: streamlit_dashboard
+    command: streamlit run dashboard/app.py --server.address=0.0.0.0 --server.port=8501
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres_db
+      POSTGRES_PORT: 5432
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
 
 volumes:
   postgres_data:

@@ -1,0 +1,20 @@
+{
+    "mae": 0.34828956608858047,
+    "mse": 0.29432010970781614,
+    "rmse": 0.5425127737738681,
+    "r2": 0.9995544684155178,
+    "train_rows": 4668,
+    "test_rows": 1168,
+    "features": [
+        "cams_pm10",
+        "hour",
+        "day",
+        "month",
+        "day_of_week",
+        "pm2_5_rolling_3h",
+        "pm10_rolling_3h",
+        "pm2_5_lag_1",
+        "pm10_lag_1"
+    ],
+    "target": "cams_pm2_5"
+}

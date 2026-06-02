@@ -36,24 +36,24 @@ try:
 
     logging.info("Time-based features created")
 
-    df["pm2_5_rolling_3h"] = (
-        df.groupby("city")["cams_pm2_5"]
-        .transform(lambda x: x.rolling(window=3, min_periods=1).mean())
-    )
-
-    df["pm10_rolling_3h"] = (
-        df.groupby("city")["cams_pm10"]
-        .transform(lambda x: x.rolling(window=3, min_periods=1).mean())
-    )
-
     df["pm2_5_lag_1"] = (
-        df.groupby("city")["cams_pm2_5"]
-        .shift(1)
+    df.groupby("city")["cams_pm2_5"]
+    .shift(1)
     )
-
+    
     df["pm10_lag_1"] = (
-        df.groupby("city")["cams_pm10"]
-        .shift(1)
+    df.groupby("city")["cams_pm10"]
+    .shift(1)
+    )
+    
+    df["pm2_5_rolling_3h"] = (
+    df.groupby("city")["cams_pm2_5"]
+    .transform(lambda x: x.shift(1).rolling(window=3, min_periods=1).mean())
+    )
+    
+    df["pm10_rolling_3h"] = (
+    df.groupby("city")["cams_pm10"]
+    .transform(lambda x: x.shift(1).rolling(window=3, min_periods=1).mean())
     )
 
     logging.info("Rolling and lag features created")

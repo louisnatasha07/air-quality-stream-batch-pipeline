@@ -5,6 +5,8 @@ import logging
 import pandas as pd
 import joblib
 
+from batch.utils.telegram_alert import send_telegram_message
+
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -26,6 +28,24 @@ try:
 
     logging.info(f"Loading feature dataset from {DATA_FILE}")
     df = pd.read_csv(DATA_FILE)
+    
+    TARGET_CITIES = {
+        "Jakarta",
+        "Surakarta",
+        "Kuala Lumpur",
+        "Singapore",
+    }
+    
+    actual_cities = set(df["city"].unique())
+    unexpected_cities = actual_cities - TARGET_CITIES
+    
+    if unexpected_cities:
+        raise ValueError(
+            f"Unexpected cities found in batch dataset: {sorted(unexpected_cities)}"
+            )
+        
+    df = df[df["city"].isin(TARGET_CITIES)]
+
     logging.info(f"Dataset loaded with shape {df.shape}")
 
     logging.info(f"Loading trained model from {MODEL_FILE}")
@@ -65,18 +85,29 @@ try:
     anomaly_count = int(df["is_anomaly"].sum())
 
     logging.info(f"Total anomalies detected: {anomaly_count}")
-
+    
     if anomaly_count > 0:
+        anomaly_by_city = (
+            df[df["is_anomaly"]]
+            .groupby("city")
+            .size()
+            .reset_index(name="anomaly_count")
+            )
+        
+        anomaly_detail = "\n".join(
+            f"- {row.city}: {row.anomaly_count} anomalies"
+            for row in anomaly_by_city.itertuples()
+            )
+        
         alert_message = (
-            f"ALERT: {anomaly_count} PM2.5 anomalies detected "
-            "in CAMS batch data"
-        )
-
+            "BATCH ALERT: PM2.5 anomalies detected\n"
+            f"Total anomalies: {anomaly_count}\n"
+            f"{anomaly_detail}"
+            )
+        
         print(alert_message)
-
         logging.warning(alert_message)
-
-    logging.info("Writing detailed CAMS data to PostgreSQL")
+        send_telegram_message(alert_message)
 
     df.to_sql(
         "cams_air_quality_data",
@@ -106,6 +137,15 @@ try:
     )
 
     logging.info("Load to PostgreSQL pipeline completed")
+    
+    success_message = (
+        "BATCH SUCCESS: CAMS batch pipeline completed\n"
+        f"Rows inserted: {len(df)}\n"
+        f"Cities: {', '.join(sorted(df['city'].unique()))}\n"
+        f"Anomalies detected: {anomaly_count}"
+        )
+    
+    send_telegram_message(success_message)
 
     print("CAMS final dataset inserted into PostgreSQL.")
     print(df.shape)
@@ -113,4 +153,9 @@ try:
 except Exception as e:
     logging.error("Load to PostgreSQL pipeline failed")
     logging.exception(e)
+
+    send_telegram_message(
+        f"BATCH FAILED: Load to PostgreSQL pipeline failed\nError: {str(e)}"
+    )
+
     raise
