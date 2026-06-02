@@ -149,6 +149,7 @@ class TelegramAlerter:
             payload = item['payload']
             aqi = payload.get('aqi', 0)
             pm25 = payload.get('pm25', 0)
+            pm10 = payload.get('pm10', 0)
             city = payload.get('city', 'Unknown')
             
             category, priority = self._categorize_aqi(aqi, pm25)
@@ -156,6 +157,7 @@ class TelegramAlerter:
             groups[category].append({
                 'city': city,
                 'pm25': pm25,
+                'pm10': pm10,
                 'aqi': aqi,
                 'priority': priority
             })
@@ -196,8 +198,9 @@ class TelegramAlerter:
             for city_data in cities:
                 city_name = city_data['city']
                 pm25_val = city_data['pm25']
+                pm10_val = city_data['pm10']
                 aqi_val = city_data['aqi']
-                lines.append(f"  {city_name}: PM2.5 {pm25_val:.1f} | AQI {aqi_val:.0f}")
+                lines.append(f"  {city_name}: PM2.5 {pm25_val:.1f} | PM10 {pm10_val:.1f} | AQI {aqi_val:.0f}")
             
             lines.append("")  # Empty line between categories
         
