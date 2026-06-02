@@ -3,6 +3,7 @@ import time
 import requests
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from kafka import KafkaProducer
 
@@ -19,7 +20,7 @@ KAFKA_SERVER = os.getenv('KAFKA_BOOTSTRAP_SERVER', 'localhost:9092')
 API_URL = os.getenv('OPEN_METEO_API', 'https://air-quality-api.open-meteo.com/v1/air-quality')
 TOPIC_NAME = 'air_quality_stream'
 
-# 3 Cities untuk sinkron dengan batch processing
+# 4 Cities untuk monitoring (3 untuk sinkron dengan batch + 1 lokal)
 CITIES = [
     {
         "city": "Jakarta",
@@ -35,6 +36,11 @@ CITIES = [
         "city": "Singapore",
         "latitude": 1.3521,
         "longitude": 103.8198
+    },
+    {
+        "city": "Surakarta",
+        "latitude": -7.5561,
+        "longitude": 110.8317
     }
 ]
 
@@ -58,6 +64,47 @@ def fetch_telemetry_data(city_data):
         print(f"[CRITICAL ERROR] Koneksi terputus: {e}")
         return None
 
+def fetch_and_send(city_data, producer):
+    """
+    Fetch data untuk 1 city dan langsung kirim ke Kafka.
+    Function ini akan dijalankan parallel untuk semua cities.
+    """
+    raw_data = fetch_telemetry_data(city_data)
+    
+    if raw_data and 'current' in raw_data:
+        current = raw_data['current']
+        
+        # Formatting payload
+        payload = {
+            "timestamp": current.get('time'),
+            "city": city_data["city"],
+            "latitude": city_data["latitude"],
+            "longitude": city_data["longitude"],
+            "pm25": current.get('pm2_5'),
+            "pm10": current.get('pm10'),
+            "carbon_monoxide": current.get('carbon_monoxide'),
+            "nitrogen_dioxide": current.get('nitrogen_dioxide'),
+            "sulphur_dioxide": current.get('sulphur_dioxide'),
+            "ozone": current.get('ozone'),
+            "aqi": current.get('us_aqi')
+        }
+        
+        # Kirim ke Kafka
+        producer.send(TOPIC_NAME, value=payload)
+        
+        return {
+            "city": city_data["city"],
+            "pm25": payload['pm25'],
+            "aqi": payload['aqi'],
+            "timestamp": payload['timestamp'],
+            "success": True
+        }
+    else:
+        return {
+            "city": city_data["city"],
+            "success": False
+        }
+
 def main():
     # Inisialisasi Vanguard Producer
     producer = KafkaProducer(
@@ -67,42 +114,41 @@ def main():
     print(f"[SYSTEM READY] Vanguard Producer standby. Mengunci target topic: {TOPIC_NAME}")
     print("[UPLINK ESTABLISHED] Memulai transmisi data stream...")
     print(f"[MONITORING] {len(CITIES)} cities: {', '.join([c['city'] for c in CITIES])}")
+    print("[MODE] Parallel fetching - semua cities sekaligus")
     print()
     
-    city_index = 0
-    
     while True:
-        # Rotate cities (Jakarta → KL → Singapore → Jakarta → ...)
-        current_city = CITIES[city_index]
+        start_time = time.time()
         
-        raw_data = fetch_telemetry_data(current_city)
-        
-        if raw_data and 'current' in raw_data:
-            current = raw_data['current']
-            
-            # Formatting payload agar sinkron dengan skema database
-            payload = {
-                "timestamp": current.get('time'),
-                "city": current_city["city"],
-                "latitude": current_city["latitude"],
-                "longitude": current_city["longitude"],
-                "pm25": current.get('pm2_5'),
-                "pm10": current.get('pm10'),
-                "carbon_monoxide": current.get('carbon_monoxide'),
-                "nitrogen_dioxide": current.get('nitrogen_dioxide'),
-                "sulphur_dioxide": current.get('sulphur_dioxide'),
-                "ozone": current.get('ozone'),
-                "aqi": current.get('us_aqi')
+        # Fetch semua cities secara parallel menggunakan ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(CITIES)) as executor:
+            # Submit semua tasks
+            futures = {
+                executor.submit(fetch_and_send, city, producer): city 
+                for city in CITIES
             }
             
-            # Tembakkan payload ke Kafka
-            producer.send(TOPIC_NAME, value=payload)
-            print(f"[{current_city['city']:15}] PM2.5: {payload['pm25']:6.1f} | AQI: {payload['aqi']:4} | {payload['timestamp']}")
+            # Collect results as they complete
+            results = []
+            for future in as_completed(futures):
+                result = future.result()
+                results.append(result)
+            
+            # Sort results by city name untuk display yang konsisten
+            results.sort(key=lambda x: x['city'])
+            
+            # Print results
+            for result in results:
+                if result['success']:
+                    print(f"[{result['city']:15}] PM2.5: {result['pm25']:6.1f} | AQI: {result['aqi']:4} | {result['timestamp']}")
+                else:
+                    print(f"[{result['city']:15}] FAILED to fetch data")
         
-        # Rotate ke city berikutnya
-        city_index = (city_index + 1) % len(CITIES)
+        elapsed = time.time() - start_time
+        print(f"[BATCH COMPLETE] {len(CITIES)} cities fetched in {elapsed:.2f}s")
+        print()
         
-        # Cooldown skill sebelum scouting berikutnya (5 detik)
+        # Cooldown sebelum batch berikutnya (5 detik)
         time.sleep(5)
 
 if __name__ == "__main__":
