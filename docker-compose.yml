@@ -90,6 +90,41 @@ services:
     depends_on:
       - postgres
 
+  stream_producer:
+    build: .
+    container_name: stream_producer
+    command: python stream/producer/producer.py
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVER: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    volumes:
+      - .:/app
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  stream_consumer:
+    build: .
+    container_name: stream_consumer
+    command: python stream/consumer/consumer.py
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres_db
+      POSTGRES_PORT: 5432
+      DATABASE_HOST: postgres_db
+      DATABASE_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVER: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    volumes:
+      - .:/app
+    depends_on:
+      - kafka
+      - postgres
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   dagster_home:
