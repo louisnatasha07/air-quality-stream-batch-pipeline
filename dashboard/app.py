@@ -21,6 +21,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# =========================
+# STREAMLIT PLOTLY SAFE KEY PATCH
+# =========================
+_original_plotly_chart = st.plotly_chart
+_plotly_chart_counter = 0
+
+
+def safe_plotly_chart(*args, **kwargs):
+    global _plotly_chart_counter
+
+    if "key" not in kwargs:
+        _plotly_chart_counter += 1
+        kwargs["key"] = f"plotly_chart_{_plotly_chart_counter}"
+
+    return _original_plotly_chart(*args, **kwargs)
+
+
+st.plotly_chart = safe_plotly_chart
+
 # ============================================================
 # CONSTANTS
 # ============================================================
