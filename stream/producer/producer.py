@@ -44,25 +44,40 @@ CITIES = [
     }
 ]
 
-def fetch_telemetry_data(city_data):
-    """Scouting data dari Open-Meteo API untuk city tertentu."""
+def fetch_telemetry_data(city_data, retries=3):
+    """Fetch data dari Open-Meteo API dengan retry dan timeout."""
     params = {
         "latitude": city_data["latitude"],
         "longitude": city_data["longitude"],
         "current": "pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi",
         "timezone": "auto"
     }
-    
-    try:
-        response = requests.get(API_URL, params=params)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"[SYSTEM ERROR] Gagal menembus API untuk {city_data['city']}. Status Code: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"[CRITICAL ERROR] Koneksi terputus: {e}")
-        return None
+
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.get(
+                API_URL,
+                params=params,
+                timeout=10
+            )
+            response.raise_for_status()
+
+            data = response.json()
+
+            if "current" not in data:
+                raise ValueError("Field 'current' tidak ditemukan di response API")
+
+            return data
+
+        except Exception as e:
+            print(
+                f"[API ERROR] {city_data['city']} attempt {attempt}/{retries}: {e}"
+            )
+
+            if attempt == retries:
+                return None
+
+            time.sleep(2 ** attempt)
 
 def fetch_and_send(city_data, producer):
     """
@@ -90,7 +105,7 @@ def fetch_and_send(city_data, producer):
         }
         
         # Kirim ke Kafka
-        producer.send(TOPIC_NAME, value=payload)
+        producer.send(TOPIC_NAME, value=payload).get(timeout=10)
         
         return {
             "city": city_data["city"],

@@ -6,6 +6,8 @@ import psycopg2
 import time
 from dotenv import load_dotenv
 from kafka import KafkaConsumer
+from collections import defaultdict
+from stream.anomaly_detection.anomaly_detector import AnomalyDetector
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -42,24 +44,74 @@ DB_USER = os.getenv('POSTGRES_USER', 'postgres')
 DB_PASS = os.getenv('POSTGRES_PASSWORD', 'Shantvl07')
 DB_NAME = os.getenv('POSTGRES_DB', 'air_quality_db')
 
+detectors = defaultdict(lambda: AnomalyDetector(window_size=20, z_threshold=3.0))
+
 def check_anomaly(payload):
-    """Rule-based anomaly detection (Early Game Level).
-    Mendeteksi hazard berdasarkan threshold polusi udara standar."""
-    pm25 = payload.get('pm25') or 0
-    aqi = payload.get('aqi') or 0
-    
-    # Threshold: PM2.5 > 50 atau AQI > 100 memicu alert anomali
-    if pm25 > 50 or aqi > 100:
-        return True, f"Hazard! PM2.5: {pm25}, AQI: {aqi}"
-    return False, "Normal"
+    city = payload.get("city", "Unknown")
+    return detectors[city].detect(payload)
+
+def ensure_stream_table(cursor):
+    """Membuat tabel stream otomatis kalau belum ada."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS air_quality_stream (
+            id SERIAL PRIMARY KEY,
+            timestamp TIMESTAMP,
+            city VARCHAR(100),
+            latitude FLOAT,
+            longitude FLOAT,
+            pm25 FLOAT,
+            pm10 FLOAT,
+            carbon_monoxide FLOAT,
+            nitrogen_dioxide FLOAT,
+            sulphur_dioxide FLOAT,
+            ozone FLOAT,
+            aqi FLOAT,
+            is_anomaly BOOLEAN,
+            anomaly_reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_air_quality_stream_city_timestamp
+        ON air_quality_stream (city, timestamp);
+    """)
 
 def sync_to_inventory(cursor, payload, is_anomaly, reason):
     """Menyimpan data hasil tangkapan ke dalam tabel PostgreSQL."""
     insert_query = """
         INSERT INTO air_quality_stream 
-        (timestamp, city, latitude, longitude, pm25, pm10, carbon_monoxide, nitrogen_dioxide, sulphur_dioxide, ozone, aqi, is_anomaly, anomaly_reason)
+        (
+            timestamp,
+            city,
+            latitude,
+            longitude,
+            pm25,
+            pm10,
+            carbon_monoxide,
+            nitrogen_dioxide,
+            sulphur_dioxide,
+            ozone,
+            aqi,
+            is_anomaly,
+            anomaly_reason
+        )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (city, timestamp)
+        DO UPDATE SET
+            latitude = EXCLUDED.latitude,
+            longitude = EXCLUDED.longitude,
+            pm25 = EXCLUDED.pm25,
+            pm10 = EXCLUDED.pm10,
+            carbon_monoxide = EXCLUDED.carbon_monoxide,
+            nitrogen_dioxide = EXCLUDED.nitrogen_dioxide,
+            sulphur_dioxide = EXCLUDED.sulphur_dioxide,
+            ozone = EXCLUDED.ozone,
+            aqi = EXCLUDED.aqi,
+            is_anomaly = EXCLUDED.is_anomaly,
+            anomaly_reason = EXCLUDED.anomaly_reason;
     """
+
     record = (
         payload['timestamp'], payload.get('city', 'Unknown'), payload['latitude'], payload['longitude'],
         payload['pm25'], payload['pm10'], payload['carbon_monoxide'],
@@ -76,8 +128,12 @@ def main():
         conn = psycopg2.connect(
             host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASS, dbname=DB_NAME
         )
-        conn.autocommit = True
+        conn.autocommit = False
         cursor = conn.cursor()
+        
+        ensure_stream_table(cursor)
+        conn.commit()
+        
         print("[DB UPLINK] Sukses terhubung ke PostgreSQL.")
     except Exception as e:
         print(f"[CRITICAL ERROR] Gagal menembus Database: {e}")
@@ -89,7 +145,7 @@ def main():
         bootstrap_servers=KAFKA_SERVER,
         group_id=CONSUMER_GROUP,  # Important: prevent duplicate reads
         auto_offset_reset='latest',
-        enable_auto_commit=True,
+        enable_auto_commit=False,
         consumer_timeout_ms=MESSAGE_TIMEOUT * 1000,  # Timeout untuk batch detection
         value_deserializer=lambda x: json.loads(x.decode('utf-8'))
     )
@@ -108,22 +164,38 @@ def main():
             for message in consumer:
                 payload = message.value
                 
-                # Cek status debuff
-                is_anomaly, reason = check_anomaly(payload)
-                
-                # Eksekusi sinkronisasi
-                sync_to_inventory(cursor, payload, is_anomaly, reason)
-                
-                # Status log
-                city = payload.get('city', 'Unknown')
-                status_tag = "[! ANOMALI !]" if is_anomaly else "[NORMAL]"
-                print(f"[{city:15}] {status_tag} PM2.5: {payload.get('pm25', 0):.1f} | AQI: {payload.get('aqi', 0)} -> DB")
-                
-                # Tambahkan ke batch buffer (tidak langsung kirim)
-                if TELEGRAM_ENABLED and alerter:
-                    alerter.add_to_batch(payload, reason)
-                
-                messages_in_batch += 1
+                try:
+                    # Cek status anomali
+                    is_anomaly, reason = check_anomaly(payload)
+                    
+                    # Simpan ke database
+                    sync_to_inventory(cursor, payload, is_anomaly, reason)
+                    
+                    # Commit database dulu
+                    conn.commit()
+                    
+                    # Kalau database berhasil, baru commit offset Kafka
+                    consumer.commit()
+                    
+                    # Status log
+                    city = payload.get('city', 'Unknown')
+                    status_tag = "[! ANOMALI !]" if is_anomaly else "[NORMAL]"
+                    print(
+                        f"[{city:15}] {status_tag} "
+                        f"PM2.5: {payload.get('pm25', 0):.1f} | "
+                        f"AQI: {payload.get('aqi', 0)} -> DB"
+                        )
+                    
+                    # Tambahkan ke batch buffer setelah DB sukses
+                    if TELEGRAM_ENABLED and alerter:
+                        alerter.add_to_batch(payload, reason)
+                        
+                        messages_in_batch += 1
+                        
+                except Exception as e:
+                    conn.rollback()
+                    print(f"[DB ERROR] Gagal memproses message: {e}")
+                    continue
                 
                 # Kalau sudah dapat EXPECTED_CITIES, kirim notif
                 if messages_in_batch >= EXPECTED_CITIES:

@@ -1,7 +1,8 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from dotenv import load_dotenv
 from pathlib import Path
 import os
+import logging
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -12,20 +13,20 @@ DB_HOST = os.getenv("POSTGRES_HOST", os.getenv("DATABASE_HOST", "localhost"))
 DB_PORT = os.getenv("POSTGRES_PORT", os.getenv("DATABASE_PORT", "5432"))
 DB_NAME = os.getenv("POSTGRES_DB")
 
-print("DB_USER:", DB_USER)
-print("DB_HOST:", DB_HOST)
-print("DB_PORT:", DB_PORT)
-print("DB_NAME:", DB_NAME)
+missing = [
+    name for name, value in {
+        "POSTGRES_USER": DB_USER,
+        "POSTGRES_PASSWORD": DB_PASSWORD,
+        "POSTGRES_DB": DB_NAME,
+    }.items()
+    if not value
+]
 
-DATABASE_URL = (
-    f"postgresql://{DB_USER}:{DB_PASSWORD}"
-    f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+if missing:
+    raise RuntimeError(f"Missing database environment variables: {missing}")
 
-engine = create_engine(DATABASE_URL)
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-with engine.connect() as conn:
-    result = conn.execute(text("SELECT current_database();"))
-    print("Connected to database:", result.scalar())
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
-print("Database connected successfully.")
+logging.info("Database engine initialized for host=%s port=%s db=%s", DB_HOST, DB_PORT, DB_NAME)

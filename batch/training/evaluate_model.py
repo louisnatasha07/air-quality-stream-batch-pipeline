@@ -2,34 +2,33 @@ import pandas as pd
 import joblib
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from batch.training.model_config import DATASET_FILE, MODEL_FILE, FEATURES, TARGET, TIME_COL
 
-df = pd.read_csv("data/processed/merged_air_quality.csv")
+df = pd.read_csv(DATASET_FILE)
 df = df.dropna()
+df[TIME_COL] = pd.to_datetime(df[TIME_COL])
+df = df.sort_values(["city", TIME_COL])
 
-features = [
-    "pm10",
-    "carbon_monoxide",
-    "nitrogen_dioxide",
-    "ozone",
-    "hour",
-    "day",
-    "cams_pm2_5",
-    "cams_pm10"
-]
+df["row_number"] = df.groupby("city").cumcount()
+df["total_rows"] = df.groupby("city")["row_number"].transform("max") + 1
 
-X = df[features]
-y = df["pm2_5"]
+test_df = df[df["row_number"] >= df["total_rows"] * 0.8]
 
-model = joblib.load("models/trained_model.pkl")
+X_test = test_df[FEATURES]
+y_test = test_df[TARGET]
 
-predictions = model.predict(X)
+model = joblib.load(MODEL_FILE)
 
-mae = mean_absolute_error(y, predictions)
-mse = mean_squared_error(y, predictions)
-r2 = r2_score(y, predictions)
+predictions = model.predict(X_test)
 
-print("Model Evaluation")
+mae = mean_absolute_error(y_test, predictions)
+mse = mean_squared_error(y_test, predictions)
+rmse = mse ** 0.5
+r2 = r2_score(y_test, predictions)
+
+print("Model Evaluation on Time-Based Holdout")
+print("Test rows:", len(test_df))
 print("MAE:", mae)
 print("MSE:", mse)
-print("RMSE:", mse ** 0.5)
+print("RMSE:", rmse)
 print("R2 Score:", r2)
