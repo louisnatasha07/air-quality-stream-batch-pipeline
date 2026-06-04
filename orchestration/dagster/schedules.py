@@ -1,6 +1,7 @@
 from dagster import ScheduleDefinition
 
-monthly_cams_schedule = ScheduleDefinition(
+batch_schedule = ScheduleDefinition(
     job_name="__ASSET_JOB",
-    cron_schedule="0 0 1 * *"
+    cron_schedule="0 1 * * *",
+    execution_timezone="Asia/Jakarta",
 )

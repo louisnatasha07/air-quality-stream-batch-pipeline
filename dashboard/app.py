@@ -157,6 +157,29 @@ st.markdown(
         margin-top: 22px;
         margin-bottom: 22px;
     }
+
+    .filter-card-title {
+        font-size: 14px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: #b8c2d6;
+        font-weight: 800;
+        margin-bottom: 2px;
+    }
+    .filter-card-caption {
+        color: #7b8aa5;
+        font-size: 13px;
+        margin-bottom: 12px;
+    }
+    div[data-testid="stDateInput"] label,
+    div[data-testid="stMultiSelect"] label,
+    div[data-testid="stSelectbox"] label {
+        color: #d8dee9 !important;
+        font-weight: 700 !important;
+    }
+    div[data-testid="stDateInput"] input {
+        border-radius: 10px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -328,25 +351,76 @@ def gather_dates(df_col_pairs):
     return dates
 
 
-def render_tab_filters(key_prefix, city_source_dfs=None, date_sources=None, show_city=True):
-    city_source_dfs = city_source_dfs or []
-    date_sources = date_sources or []
 
+def get_city_options(city_source_dfs=None):
+    city_source_dfs = city_source_dfs or []
     cities = set()
+
     for df in city_source_dfs:
         if df is not None and not df.empty and "city" in df.columns:
             cities.update(df["city"].dropna().tolist())
+
     if not cities:
         cities = set(TARGET_CITIES)
-    cities = sorted(cities)
 
-    dates = gather_dates(date_sources)
-    min_date = min(dates) if dates else date.today()
-    max_date = max(dates) if dates else date.today()
+    return sorted(cities)
 
-    render_mini_title("Filter")
-    if show_city:
-        col_city, col_date = st.columns([1, 2])
+
+def get_date_bounds(date_sources=None):
+    dates = gather_dates(date_sources or [])
+    if dates:
+        return min(dates), max(dates)
+    return date.today(), date.today()
+
+
+def normalize_date_range(selected_range, min_date, max_date):
+    if isinstance(selected_range, tuple) and len(selected_range) == 2:
+        return selected_range
+    return min_date, max_date
+
+
+def render_filter_heading(title, caption=None):
+    st.markdown(f'<div class="filter-card-title">{title}</div>', unsafe_allow_html=True)
+    if caption:
+        st.markdown(f'<div class="filter-card-caption">{caption}</div>', unsafe_allow_html=True)
+
+
+def render_date_range_filter(key_prefix, date_sources=None, title="Date Range", caption=None):
+    min_date, max_date = get_date_bounds(date_sources)
+
+    try:
+        filter_box = st.container(border=True)
+    except TypeError:
+        filter_box = st.container()
+
+    with filter_box:
+        render_filter_heading(title, caption)
+        selected_range = st.date_input(
+            "Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            key=f"{key_prefix}_date_range",
+        )
+
+    return normalize_date_range(selected_range, min_date, max_date)
+
+
+def render_compare_filters(key_prefix, city_source_dfs=None, date_sources=None):
+    cities = get_city_options(city_source_dfs)
+    min_date, max_date = get_date_bounds(date_sources)
+
+    try:
+        filter_box = st.container(border=True)
+    except TypeError:
+        filter_box = st.container()
+
+    with filter_box:
+        render_filter_heading(
+            "Comparison Filter",
+            "Pilih kota dan rentang tanggal untuk membandingkan ML prediction dengan realtime Open-Meteo.",
+        )
+        col_city, col_date = st.columns([1.1, 2.4])
         with col_city:
             selected_cities = st.multiselect(
                 "Cities",
@@ -362,21 +436,8 @@ def render_tab_filters(key_prefix, city_source_dfs=None, date_sources=None, show
                 max_value=max_date,
                 key=f"{key_prefix}_date_range",
             )
-    else:
-        selected_cities = cities
-        selected_range = st.date_input(
-            "Date Range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-            key=f"{key_prefix}_date_range",
-        )
 
-    if isinstance(selected_range, tuple) and len(selected_range) == 2:
-        start_date, end_date = selected_range
-    else:
-        start_date, end_date = min_date, max_date
-
+    start_date, end_date = normalize_date_range(selected_range, min_date, max_date)
     return selected_cities, start_date, end_date
 
 
@@ -605,18 +666,21 @@ tab_overview, tab_batch, tab_stream, tab_compare, tab_anomaly, tab_data, tab_hea
 # ============================================================
 with tab_overview:
     render_section("Executive Summary")
-    selected_cities, start_date, end_date = render_tab_filters(
+
+    overview_cities = get_city_options([batch_summary, batch_data, stream_data])
+    start_date, end_date = render_date_range_filter(
         "overview",
-        city_source_dfs=[batch_summary, batch_data, stream_data],
         date_sources=[(batch_data, batch_time_col), (stream_data, STREAM_DISPLAY_TIME_COL)],
+        title="Executive Date Range",
+        caption="Filter ringkas untuk melihat kondisi batch dan stream pada rentang tanggal tertentu.",
     )
 
-    filtered_batch_data = filter_by_date(filter_by_cities(batch_data, selected_cities), batch_time_col, start_date, end_date)
-    filtered_stream_data = filter_by_date(filter_by_cities(stream_data, selected_cities), STREAM_DISPLAY_TIME_COL, start_date, end_date)
+    filtered_batch_data = filter_by_date(filter_by_cities(batch_data, overview_cities), batch_time_col, start_date, end_date)
+    filtered_stream_data = filter_by_date(filter_by_cities(stream_data, overview_cities), STREAM_DISPLAY_TIME_COL, start_date, end_date)
     filtered_batch_summary = filtered_summary_from_detail(
         batch_summary,
         filtered_batch_data,
-        selected_cities,
+        overview_cities,
         (summary_avg_col, summary_max_col, summary_pred_col, summary_anomaly_col, batch_pm25_col, prediction_col, batch_anomaly_col),
     )
 
@@ -631,7 +695,7 @@ with tab_overview:
     latest_stream_time = latest_stream[STREAM_DISPLAY_TIME_COL].max() if not latest_stream.empty and STREAM_DISPLAY_TIME_COL else np.nan
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Cities Monitored", len(selected_cities))
+    c1.metric("Cities Monitored", len(overview_cities))
     c2.metric("Batch Records", f"{len(filtered_batch_data):,}")
     c3.metric("Stream Records", f"{len(filtered_stream_data):,}")
     c4.metric("Batch Anomalies", f"{total_batch_anomalies:,}")
@@ -736,33 +800,30 @@ with tab_overview:
 # ============================================================
 with tab_batch:
     render_section("Batch CAMS Processing Output")
-    selected_cities, start_date, end_date = render_tab_filters(
-        "batch",
-        city_source_dfs=[batch_summary, batch_data],
-        date_sources=[(batch_data, batch_time_col)],
-    )
-    filtered_batch_data = filter_by_date(filter_by_cities(batch_data, selected_cities), batch_time_col, start_date, end_date)
-    filtered_batch_summary = filtered_summary_from_detail(
+
+    batch_cities = get_city_options([batch_summary, batch_data])
+    batch_output_data = filter_by_cities(batch_data, batch_cities)
+    batch_output_summary = filtered_summary_from_detail(
         batch_summary,
-        filtered_batch_data,
-        selected_cities,
+        batch_output_data,
+        batch_cities,
         (summary_avg_col, summary_max_col, summary_pred_col, summary_anomaly_col, batch_pm25_col, prediction_col, batch_anomaly_col),
     )
 
-    if filtered_batch_data.empty and filtered_batch_summary.empty:
-        st.warning("Batch data is empty in the selected date range. Run the Dagster batch pipeline first or adjust the date range.")
+    if batch_output_data.empty and batch_output_summary.empty:
+        st.warning("Batch data is empty. Run the Dagster batch pipeline first.")
     else:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Batch Cities", filtered_batch_data["city"].nunique() if "city" in filtered_batch_data.columns else 0)
-        c2.metric("Avg CAMS PM2.5", "-" if filtered_batch_data.empty or not batch_pm25_col else f"{filtered_batch_data[batch_pm25_col].mean():.2f}")
-        c3.metric("Max CAMS PM2.5", "-" if filtered_batch_data.empty or not batch_pm25_col else f"{filtered_batch_data[batch_pm25_col].max():.2f}")
-        c4.metric("Batch Anomalies", "-" if filtered_batch_data.empty or not batch_anomaly_col else f"{int(filtered_batch_data[batch_anomaly_col].sum()):,}")
+        c1.metric("Batch Cities", batch_output_data["city"].nunique() if "city" in batch_output_data.columns else 0)
+        c2.metric("Avg CAMS PM2.5", "-" if batch_output_data.empty or not batch_pm25_col else f"{batch_output_data[batch_pm25_col].mean():.2f}")
+        c3.metric("Max CAMS PM2.5", "-" if batch_output_data.empty or not batch_pm25_col else f"{batch_output_data[batch_pm25_col].max():.2f}")
+        c4.metric("Batch Anomalies", "-" if batch_output_data.empty or not batch_anomaly_col else f"{int(batch_output_data[batch_anomaly_col].sum()):,}")
 
-        if not filtered_batch_summary.empty:
-            st.dataframe(filtered_batch_summary, use_container_width=True)
+        if not batch_output_summary.empty:
+            st.dataframe(batch_output_summary, use_container_width=True)
 
-        if not filtered_batch_summary.empty and "average_pm25" in filtered_batch_summary.columns:
-            temp = add_status_column(filtered_batch_summary, "average_pm25")
+        if not batch_output_summary.empty and "average_pm25" in batch_output_summary.columns:
+            temp = add_status_column(batch_output_summary, "average_pm25")
             fig_rank = px.bar(
                 temp.sort_values("average_pm25", ascending=False),
                 x="city",
@@ -775,8 +836,8 @@ with tab_batch:
             )
             st.plotly_chart(fig_rank, use_container_width=True)
 
-        if not filtered_batch_summary.empty and "max_pm25" in filtered_batch_summary.columns:
-            temp_max = add_status_column(filtered_batch_summary, "max_pm25")
+        if not batch_output_summary.empty and "max_pm25" in batch_output_summary.columns:
+            temp_max = add_status_column(batch_output_summary, "max_pm25")
             fig_max = px.bar(
                 temp_max.sort_values("max_pm25", ascending=False),
                 x="city",
@@ -789,9 +850,9 @@ with tab_batch:
             )
             st.plotly_chart(fig_max, use_container_width=True)
 
-        if not filtered_batch_summary.empty and "anomaly_count" in filtered_batch_summary.columns:
+        if not batch_output_summary.empty and "anomaly_count" in batch_output_summary.columns:
             fig_anom = px.bar(
-                filtered_batch_summary.sort_values("anomaly_count", ascending=False),
+                batch_output_summary.sort_values("anomaly_count", ascending=False),
                 x="city",
                 y="anomaly_count",
                 title="Batch Anomaly Count by City",
@@ -800,72 +861,81 @@ with tab_batch:
             st.plotly_chart(fig_anom, use_container_width=True)
 
     render_section("Batch Detail Trend")
-    if filtered_batch_data.empty:
-        st.warning("Batch detail data is empty in the selected date range.")
+    if batch_data.empty:
+        st.warning("Batch detail data is empty.")
     else:
-        selected_batch_city = st.selectbox("Select batch city", sorted(filtered_batch_data["city"].dropna().unique()), key="batch_detail_city")
-        city_batch = filtered_batch_data[filtered_batch_data["city"] == selected_batch_city].copy()
-        if batch_time_col:
-            city_batch = city_batch.sort_values(batch_time_col)
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Records", f"{len(city_batch):,}")
-        c2.metric("Avg CAMS PM2.5", "-" if not batch_pm25_col else f"{city_batch[batch_pm25_col].mean():.2f}")
-        c3.metric("Max CAMS PM2.5", "-" if not batch_pm25_col else f"{city_batch[batch_pm25_col].max():.2f}")
-        c4.metric("Anomalies", "-" if not batch_anomaly_col else f"{int(city_batch[batch_anomaly_col].sum()):,}")
-
-        if batch_time_col and batch_pm25_col:
-            fig_batch_trend = px.line(
-                city_batch,
-                x=batch_time_col,
-                y=batch_pm25_col,
-                title=f"CAMS PM2.5 Trend in {selected_batch_city}",
-                labels={batch_time_col: "Time", batch_pm25_col: "CAMS PM2.5"},
-            )
-            fig_batch_trend.update_traces(mode="lines+markers")
-            st.plotly_chart(fig_batch_trend, use_container_width=True)
-
-        if batch_time_col and batch_pm10_col:
-            fig_batch_pm10 = px.line(
-                city_batch,
-                x=batch_time_col,
-                y=batch_pm10_col,
-                title=f"CAMS PM10 Trend in {selected_batch_city}",
-                labels={batch_time_col: "Time", batch_pm10_col: "CAMS PM10"},
-            )
-            fig_batch_pm10.update_traces(mode="lines+markers")
-            st.plotly_chart(fig_batch_pm10, use_container_width=True)
-
-        insight_box(
-            "📌 Tab ini hanya menampilkan analisis batch CAMS. Perbandingan ML prediction dengan data realtime Open-Meteo dipindahkan ke tab <b>Batch vs Stream</b> agar konteksnya tidak tercampur."
+        selected_batch_city = st.selectbox(
+            "Select batch city",
+            sorted(batch_data["city"].dropna().unique()),
+            key="batch_detail_city",
+        )
+        start_date, end_date = render_date_range_filter(
+            "batch_detail",
+            date_sources=[(batch_data, batch_time_col)],
+            title="Trend Date Range",
+            caption="Filter ini hanya berlaku untuk grafik dan metrik detail kota di bawah.",
         )
 
-        with st.expander("View batch detail data"):
-            st.dataframe(city_batch.tail(300), use_container_width=True)
+        city_batch = batch_data[batch_data["city"] == selected_batch_city].copy()
+        city_batch = filter_by_date(city_batch, batch_time_col, start_date, end_date)
+        if batch_time_col and batch_time_col in city_batch.columns:
+            city_batch = city_batch.sort_values(batch_time_col)
+
+        if city_batch.empty:
+            st.warning("Tidak ada data batch untuk kota dan rentang tanggal yang dipilih.")
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Records", f"{len(city_batch):,}")
+            c2.metric("Avg CAMS PM2.5", "-" if not batch_pm25_col else f"{city_batch[batch_pm25_col].mean():.2f}")
+            c3.metric("Max CAMS PM2.5", "-" if not batch_pm25_col else f"{city_batch[batch_pm25_col].max():.2f}")
+            c4.metric("Anomalies", "-" if not batch_anomaly_col else f"{int(city_batch[batch_anomaly_col].sum()):,}")
+
+            if batch_time_col and batch_pm25_col:
+                fig_batch_trend = px.line(
+                    city_batch,
+                    x=batch_time_col,
+                    y=batch_pm25_col,
+                    title=f"CAMS PM2.5 Trend in {selected_batch_city}",
+                    labels={batch_time_col: "Time", batch_pm25_col: "CAMS PM2.5"},
+                )
+                fig_batch_trend.update_traces(mode="lines+markers")
+                st.plotly_chart(fig_batch_trend, use_container_width=True)
+
+            if batch_time_col and batch_pm10_col:
+                fig_batch_pm10 = px.line(
+                    city_batch,
+                    x=batch_time_col,
+                    y=batch_pm10_col,
+                    title=f"CAMS PM10 Trend in {selected_batch_city}",
+                    labels={batch_time_col: "Time", batch_pm10_col: "CAMS PM10"},
+                )
+                fig_batch_pm10.update_traces(mode="lines+markers")
+                st.plotly_chart(fig_batch_pm10, use_container_width=True)
+
+            insight_box(
+                "📌 Tab ini hanya menampilkan analisis batch CAMS. Perbandingan ML prediction dengan data realtime Open-Meteo dipindahkan ke tab <b>Batch vs Stream</b> agar konteksnya tidak tercampur."
+            )
+
+            with st.expander("View batch detail data"):
+                st.dataframe(city_batch.tail(300), use_container_width=True)
 
 # ============================================================
 # TAB 3 — REALTIME STREAM
 # ============================================================
 with tab_stream:
     render_section("Realtime Open-Meteo Stream Monitoring")
-    selected_cities, start_date, end_date = render_tab_filters(
-        "stream",
-        city_source_dfs=[stream_data],
-        date_sources=[(stream_data, STREAM_DISPLAY_TIME_COL)],
-    )
-    filtered_stream_data = filter_by_date(filter_by_cities(stream_data, selected_cities), STREAM_DISPLAY_TIME_COL, start_date, end_date)
 
-    if filtered_stream_data.empty:
-        st.warning("Stream data is empty in the selected date range. Run stream producer and consumer first or adjust the date range.")
+    if stream_data.empty:
+        st.warning("Stream data is empty. Run stream producer and consumer first.")
     else:
-        latest_stream = latest_per_city(filtered_stream_data, "city", STREAM_DISPLAY_TIME_COL)
+        latest_stream = latest_per_city(stream_data, "city", STREAM_DISPLAY_TIME_COL)
 
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Stream Records", f"{len(filtered_stream_data):,}")
-        c2.metric("Cities", filtered_stream_data["city"].nunique())
+        c1.metric("Stream Records", f"{len(stream_data):,}")
+        c2.metric("Cities", stream_data["city"].nunique())
         c3.metric("Latest Avg PM2.5", "-" if latest_stream.empty or not stream_pm25_col else f"{latest_stream[stream_pm25_col].mean():.2f}")
         c4.metric("Latest Max PM2.5", "-" if latest_stream.empty or not stream_pm25_col else f"{latest_stream[stream_pm25_col].max():.2f}")
-        c5.metric("Stream Anomalies", "-" if not stream_anomaly_col else f"{int(filtered_stream_data[stream_anomaly_col].sum()):,}")
+        c5.metric("Stream Anomalies", "-" if not stream_anomaly_col else f"{int(stream_data[stream_anomaly_col].sum()):,}")
 
         if STREAM_DISPLAY_TIME_COL:
             latest_time = latest_stream[STREAM_DISPLAY_TIME_COL].max() if not latest_stream.empty else np.nan
@@ -906,87 +976,102 @@ with tab_stream:
             st.plotly_chart(fig_aqi, use_container_width=True)
 
         render_section("Realtime Trend by City")
-        selected_stream_city = st.selectbox("Select stream city", sorted(filtered_stream_data["city"].dropna().unique()), key="stream_detail_city")
-        city_stream = filtered_stream_data[filtered_stream_data["city"] == selected_stream_city].copy()
-        if STREAM_DISPLAY_TIME_COL:
-            city_stream = city_stream.sort_values(STREAM_DISPLAY_TIME_COL)
-
-        pollutants = []
-        for col in [stream_pm25_col, stream_pm10_col, "carbon_monoxide", "nitrogen_dioxide", "sulphur_dioxide", "ozone", stream_aqi_col]:
-            if col and col in city_stream.columns and col not in pollutants:
-                pollutants.append(col)
-
-        selected_pollutants = st.multiselect(
-            "Select stream metrics",
-            options=pollutants,
-            default=pollutants[:2] if len(pollutants) >= 2 else pollutants,
-            key="stream_pollutant_multiselect",
+        selected_stream_city = st.selectbox(
+            "Select stream city",
+            sorted(stream_data["city"].dropna().unique()),
+            key="stream_detail_city",
+        )
+        start_date, end_date = render_date_range_filter(
+            "stream_detail",
+            date_sources=[(stream_data, STREAM_DISPLAY_TIME_COL)],
+            title="Trend Date Range",
+            caption="Filter ini hanya berlaku untuk grafik trend realtime kota yang dipilih.",
         )
 
-        if STREAM_DISPLAY_TIME_COL and selected_pollutants:
-            fig_pollutants = go.Figure()
-            for metric in selected_pollutants:
-                fig_pollutants.add_trace(
-                    go.Scatter(
-                        x=city_stream[STREAM_DISPLAY_TIME_COL],
-                        y=city_stream[metric],
-                        mode="lines+markers",
-                        name=metric,
+        city_stream = stream_data[stream_data["city"] == selected_stream_city].copy()
+        city_stream = filter_by_date(city_stream, STREAM_DISPLAY_TIME_COL, start_date, end_date)
+        if STREAM_DISPLAY_TIME_COL and STREAM_DISPLAY_TIME_COL in city_stream.columns:
+            city_stream = city_stream.sort_values(STREAM_DISPLAY_TIME_COL)
+
+        if city_stream.empty:
+            st.warning("Tidak ada data stream untuk kota dan rentang tanggal yang dipilih.")
+        else:
+            pollutants = []
+            for col in [stream_pm25_col, stream_pm10_col, "carbon_monoxide", "nitrogen_dioxide", "sulphur_dioxide", "ozone", stream_aqi_col]:
+                if col and col in city_stream.columns and col not in pollutants:
+                    pollutants.append(col)
+
+            selected_pollutants = st.multiselect(
+                "Select stream metrics",
+                options=pollutants,
+                default=pollutants[:2] if len(pollutants) >= 2 else pollutants,
+                key="stream_pollutant_multiselect",
+            )
+
+            if STREAM_DISPLAY_TIME_COL and selected_pollutants:
+                fig_pollutants = go.Figure()
+                for metric in selected_pollutants:
+                    fig_pollutants.add_trace(
+                        go.Scatter(
+                            x=city_stream[STREAM_DISPLAY_TIME_COL],
+                            y=city_stream[metric],
+                            mode="lines+markers",
+                            name=metric,
+                        )
                     )
+                fig_pollutants.update_layout(
+                    title=f"Realtime Pollutant Trend in {selected_stream_city}",
+                    xaxis_title="Processing Time (WIB)",
+                    yaxis_title="Concentration / AQI",
+                    height=520,
                 )
-            fig_pollutants.update_layout(
-                title=f"Realtime Pollutant Trend in {selected_stream_city}",
-                xaxis_title="Processing Time (WIB)",
-                yaxis_title="Concentration / AQI",
-                height=520,
-            )
-            st.plotly_chart(fig_pollutants, use_container_width=True)
+                st.plotly_chart(fig_pollutants, use_container_width=True)
 
-            if city_stream[STREAM_DISPLAY_TIME_COL].nunique() <= 1:
-                warning_box(
-                    "⚠️ Trend bisa terlihat datar/kosong kalau data realtime baru sedikit atau timestamp API masih sama. "
-                    "Open-Meteo current air quality umumnya berubah per jam, sedangkan consumer bisa mengambil data setiap beberapa detik/menit. "
-                    "Dashboard sekarang memakai waktu proses WIB agar titik tetap terlihat per cycle."
+                if city_stream[STREAM_DISPLAY_TIME_COL].nunique() <= 1:
+                    warning_box(
+                        "⚠️ Trend bisa terlihat datar/kosong kalau data realtime baru sedikit atau timestamp API masih sama. "
+                        "Open-Meteo current air quality umumnya berubah per jam, sedangkan consumer bisa mengambil data setiap beberapa detik/menit. "
+                        "Dashboard sekarang memakai waktu proses WIB agar titik tetap terlihat per cycle."
+                    )
+
+            if stream_pm25_col:
+                fig_dist = px.histogram(
+                    city_stream,
+                    x=stream_pm25_col,
+                    nbins=30,
+                    title=f"Stream PM2.5 Distribution in {selected_stream_city}",
+                    labels={stream_pm25_col: "PM2.5"},
                 )
+                st.plotly_chart(fig_dist, use_container_width=True)
 
-        if stream_pm25_col:
-            fig_dist = px.histogram(
-                city_stream,
-                x=stream_pm25_col,
-                nbins=30,
-                title=f"Stream PM2.5 Distribution in {selected_stream_city}",
-                labels={stream_pm25_col: "PM2.5"},
-            )
-            st.plotly_chart(fig_dist, use_container_width=True)
+                unique_pm25 = city_stream[stream_pm25_col].dropna().nunique()
+                if unique_pm25 <= 2:
+                    warning_box(
+                        f"Distribusi PM2.5 untuk <b>{selected_stream_city}</b> masih terlihat mirip/sangat sempit karena nilai uniknya baru <b>{unique_pm25}</b>. "
+                        "Ini normal kalau stream hanya dijalankan beberapa menit, karena API current Open-Meteo sering masih mengembalikan nilai yang sama dalam satu jam. "
+                        "Untuk distribusi yang lebih bervariasi, jalankan stream lebih lama atau ambil data lintas beberapa jam."
+                    )
 
-            unique_pm25 = city_stream[stream_pm25_col].dropna().nunique()
-            if unique_pm25 <= 2:
-                warning_box(
-                    f"Distribusi PM2.5 untuk <b>{selected_stream_city}</b> masih terlihat mirip/sangat sempit karena nilai uniknya baru <b>{unique_pm25}</b>. "
-                    "Ini normal kalau stream hanya dijalankan beberapa menit, karena API current Open-Meteo sering masih mengembalikan nilai yang sama dalam satu jam. "
-                    "Untuk distribusi yang lebih bervariasi, jalankan stream lebih lama atau ambil data lintas beberapa jam."
-                )
+            if stream_anomaly_col:
+                anomaly_stream = city_stream[city_stream[stream_anomaly_col] == True]
+                if anomaly_stream.empty:
+                    safe_box("✅ No realtime stream anomaly is currently detected in the selected city/date range.")
+                else:
+                    worst = anomaly_stream.loc[anomaly_stream[stream_pm25_col].idxmax()] if stream_pm25_col else anomaly_stream.iloc[0]
+                    alert_box(
+                        f"⚠️ Stream anomaly detected: <b>{len(anomaly_stream)}</b> anomaly records found for <b>{selected_stream_city}</b>. "
+                        f"The highest anomaly PM2.5 is <b>{worst[stream_pm25_col]:.2f}</b>."
+                    )
 
-        if stream_anomaly_col:
-            anomaly_stream = filtered_stream_data[filtered_stream_data[stream_anomaly_col] == True]
-            if anomaly_stream.empty:
-                safe_box("✅ No realtime stream anomaly is currently detected in the selected period.")
-            else:
-                worst = anomaly_stream.loc[anomaly_stream[stream_pm25_col].idxmax()] if stream_pm25_col else anomaly_stream.iloc[0]
-                alert_box(
-                    f"⚠️ Stream anomaly detected: <b>{len(anomaly_stream)}</b> anomaly records found. "
-                    f"The highest anomaly is in <b>{worst['city']}</b>."
-                )
-
-        with st.expander("View stream raw data"):
-            st.dataframe(filtered_stream_data.tail(500), use_container_width=True)
+            with st.expander("View stream raw data"):
+                st.dataframe(city_stream.tail(500), use_container_width=True)
 
 # ============================================================
 # TAB 4 — BATCH VS STREAM
 # ============================================================
 with tab_compare:
     render_section("Realtime Open-Meteo vs ML Prediction")
-    selected_cities, start_date, end_date = render_tab_filters(
+    selected_cities, start_date, end_date = render_compare_filters(
         "compare",
         city_source_dfs=[batch_data, stream_data],
         date_sources=[(batch_data, batch_time_col), (stream_data, STREAM_DISPLAY_TIME_COL)],
@@ -1133,20 +1218,13 @@ with tab_compare:
 # ============================================================
 with tab_anomaly:
     render_section("Anomaly Monitoring Center")
-    selected_cities, start_date, end_date = render_tab_filters(
-        "anomaly",
-        city_source_dfs=[batch_data, stream_data],
-        date_sources=[(batch_data, batch_time_col), (stream_data, STREAM_DISPLAY_TIME_COL)],
-    )
-    filtered_batch_data = filter_by_date(filter_by_cities(batch_data, selected_cities), batch_time_col, start_date, end_date)
-    filtered_stream_data = filter_by_date(filter_by_cities(stream_data, selected_cities), STREAM_DISPLAY_TIME_COL, start_date, end_date)
 
     col_batch, col_stream = st.columns(2)
 
     with col_batch:
         render_mini_title("Batch Anomaly Summary")
-        if batch_anomaly_col and not filtered_batch_data.empty:
-            batch_anomaly_summary = anomaly_rate_summary(filtered_batch_data, batch_anomaly_col)
+        if batch_anomaly_col and not batch_data.empty:
+            batch_anomaly_summary = anomaly_rate_summary(batch_data, batch_anomaly_col)
             fig = px.bar(
                 batch_anomaly_summary,
                 x="city",
@@ -1157,12 +1235,12 @@ with tab_anomaly:
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(batch_anomaly_summary, use_container_width=True, hide_index=True)
         else:
-            st.info("No batch anomaly data available in the selected date range.")
+            st.info("No batch anomaly data available.")
 
     with col_stream:
         render_mini_title("Stream Anomaly Summary")
-        if stream_anomaly_col and not filtered_stream_data.empty:
-            stream_anomaly_summary = anomaly_rate_summary(filtered_stream_data, stream_anomaly_col)
+        if stream_anomaly_col and not stream_data.empty:
+            stream_anomaly_summary = anomaly_rate_summary(stream_data, stream_anomaly_col)
             fig = px.bar(
                 stream_anomaly_summary,
                 x="city",
@@ -1173,20 +1251,22 @@ with tab_anomaly:
             st.plotly_chart(fig, use_container_width=True)
             st.dataframe(stream_anomaly_summary, use_container_width=True, hide_index=True)
         else:
-            st.info("No stream anomaly data available in the selected date range.")
+            st.info("No stream anomaly data available.")
 
     render_section("Anomaly Pattern Analysis")
     st.markdown(
         """
-        Bagian ini menjawab pertanyaan laporan: <b>apakah terdapat kondisi atau pola anomali pada kualitas udara
-        yang dapat mengindikasikan peningkatan tingkat pencemaran?</b>
+        <div class="insight-box">
+        <b>Pertanyaan analisis:</b><br>
+        Apakah terdapat kondisi atau pola anomali pada kualitas udara yang dapat mengindikasikan peningkatan tingkat pencemaran?
+        </div>
         """,
         unsafe_allow_html=True,
     )
 
     pattern_source = st.radio("Pattern source", ["Stream", "Batch"], horizontal=True, key="pattern_source")
     if pattern_source == "Stream":
-        pattern_df = filtered_stream_data.copy()
+        base_pattern_df = stream_data.copy()
         pattern_time_col = STREAM_DISPLAY_TIME_COL
         pattern_pm_col = stream_pm25_col
         pattern_aqi_col = stream_aqi_col
@@ -1194,7 +1274,7 @@ with tab_anomaly:
         source_label = "Realtime Open-Meteo stream"
         xaxis_label = "Processing Time (WIB)"
     else:
-        pattern_df = filtered_batch_data.copy()
+        base_pattern_df = batch_data.copy()
         pattern_time_col = batch_time_col
         pattern_pm_col = batch_pm25_col
         pattern_aqi_col = None
@@ -1202,113 +1282,141 @@ with tab_anomaly:
         source_label = "CAMS batch"
         xaxis_label = "Time"
 
-    if pattern_df.empty or not pattern_anomaly_col or pattern_anomaly_col not in pattern_df.columns or not pattern_pm_col:
-        st.info("Anomaly pattern data is not available for the selected source/date range.")
+    if base_pattern_df.empty or not pattern_anomaly_col or pattern_anomaly_col not in base_pattern_df.columns or not pattern_pm_col:
+        st.info("Anomaly pattern data is not available for the selected source.")
+        pattern_df = pd.DataFrame()
+        filtered_batch_data = batch_data.copy()
+        filtered_stream_data = stream_data.copy()
     else:
-        anomaly_detail = pattern_df[pattern_df[pattern_anomaly_col] == True].copy()
-        normal_detail = pattern_df[pattern_df[pattern_anomaly_col] == False].copy()
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Records", f"{len(pattern_df):,}")
-        c2.metric("Anomaly Records", f"{len(anomaly_detail):,}")
-        c3.metric("Anomaly Rate", f"{(len(anomaly_detail) / len(pattern_df) * 100 if len(pattern_df) else 0):.2f}%")
-        c4.metric("Avg PM2.5 during Anomaly", "-" if anomaly_detail.empty else f"{anomaly_detail[pattern_pm_col].mean():.2f}")
-
-        if pattern_time_col and pattern_time_col in pattern_df.columns:
+        if pattern_time_col and pattern_time_col in base_pattern_df.columns and "city" in base_pattern_df.columns:
             pattern_plot_city = st.selectbox(
                 "Select city for anomaly timeline",
-                sorted(pattern_df["city"].dropna().unique()),
+                sorted(base_pattern_df["city"].dropna().unique()),
                 key="anomaly_pattern_city",
             )
-            city_pattern = pattern_df[pattern_df["city"] == pattern_plot_city].sort_values(pattern_time_col)
-            city_anomalies = city_pattern[city_pattern[pattern_anomaly_col] == True]
-
-            fig_pattern = go.Figure()
-            fig_pattern.add_trace(
-                go.Scatter(
-                    x=city_pattern[pattern_time_col],
-                    y=city_pattern[pattern_pm_col],
-                    mode="lines+markers",
-                    name="PM2.5",
-                )
+            start_date, end_date = render_date_range_filter(
+                "anomaly_pattern",
+                date_sources=[(base_pattern_df, pattern_time_col)],
+                title="Anomaly Pattern Date Range",
+                caption="Filter tanggal untuk analisis pola anomali. Pilihan kota hanya memengaruhi timeline utama.",
             )
-            if not city_anomalies.empty:
+            pattern_df = filter_by_date(base_pattern_df, pattern_time_col, start_date, end_date)
+        else:
+            pattern_plot_city = None
+            pattern_df = base_pattern_df.copy()
+            start_date, end_date = get_date_bounds([(base_pattern_df, pattern_time_col)])
+
+        filtered_batch_data = filter_by_date(batch_data, batch_time_col, start_date, end_date) if batch_time_col else batch_data.copy()
+        filtered_stream_data = filter_by_date(stream_data, STREAM_DISPLAY_TIME_COL, start_date, end_date) if STREAM_DISPLAY_TIME_COL else stream_data.copy()
+
+        if pattern_df.empty:
+            st.warning("Tidak ada data anomali pada rentang tanggal yang dipilih.")
+        else:
+            anomaly_detail = pattern_df[pattern_df[pattern_anomaly_col] == True].copy()
+            normal_detail = pattern_df[pattern_df[pattern_anomaly_col] == False].copy()
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Records", f"{len(pattern_df):,}")
+            c2.metric("Anomaly Records", f"{len(anomaly_detail):,}")
+            c3.metric("Anomaly Rate", f"{(len(anomaly_detail) / len(pattern_df) * 100 if len(pattern_df) else 0):.2f}%")
+            c4.metric("Avg PM2.5 during Anomaly", "-" if anomaly_detail.empty else f"{anomaly_detail[pattern_pm_col].mean():.2f}")
+
+            if pattern_plot_city and pattern_time_col and pattern_time_col in pattern_df.columns:
+                city_pattern = pattern_df[pattern_df["city"] == pattern_plot_city].sort_values(pattern_time_col)
+                city_anomalies = city_pattern[city_pattern[pattern_anomaly_col] == True]
+
+                fig_pattern = go.Figure()
                 fig_pattern.add_trace(
                     go.Scatter(
-                        x=city_anomalies[pattern_time_col],
-                        y=city_anomalies[pattern_pm_col],
-                        mode="markers",
-                        marker=dict(size=13, symbol="x"),
-                        name="Anomaly",
+                        x=city_pattern[pattern_time_col],
+                        y=city_pattern[pattern_pm_col],
+                        mode="lines+markers",
+                        name="PM2.5",
                     )
                 )
-            fig_pattern.update_layout(
-                title=f"{source_label} PM2.5 Timeline with Anomaly Markers - {pattern_plot_city}",
-                xaxis_title=xaxis_label,
-                yaxis_title="PM2.5",
-                height=520,
-            )
-            st.plotly_chart(fig_pattern, use_container_width=True)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            rate_df = anomaly_rate_summary(pattern_df, pattern_anomaly_col)
-            if not rate_df.empty:
-                fig_rate = px.bar(
-                    rate_df,
-                    x="city",
-                    y="anomaly_rate_pct",
-                    title="Anomaly Rate by City",
-                    labels={"city": "City", "anomaly_rate_pct": "Anomaly Rate (%)"},
+                if not city_anomalies.empty:
+                    fig_pattern.add_trace(
+                        go.Scatter(
+                            x=city_anomalies[pattern_time_col],
+                            y=city_anomalies[pattern_pm_col],
+                            mode="markers",
+                            marker=dict(size=13, symbol="x"),
+                            name="Anomaly",
+                        )
+                    )
+                fig_pattern.update_layout(
+                    title=f"{source_label} PM2.5 Timeline with Anomaly Markers - {pattern_plot_city}",
+                    xaxis_title=xaxis_label,
+                    yaxis_title="PM2.5",
+                    height=520,
                 )
-                st.plotly_chart(fig_rate, use_container_width=True)
-        with col2:
-            dist_df = pattern_df[["city", pattern_pm_col, pattern_anomaly_col]].dropna().copy()
-            dist_df["record_type"] = np.where(dist_df[pattern_anomaly_col], "Anomaly", "Normal")
-            fig_box = px.box(
-                dist_df,
-                x="record_type",
-                y=pattern_pm_col,
-                color="record_type",
-                title="PM2.5 Distribution: Normal vs Anomaly",
-                labels={pattern_pm_col: "PM2.5", "record_type": "Record Type"},
-            )
-            st.plotly_chart(fig_box, use_container_width=True)
+                st.plotly_chart(fig_pattern, use_container_width=True)
 
-        if pattern_time_col and pattern_time_col in pattern_df.columns and not anomaly_detail.empty:
-            anomaly_detail["hour"] = anomaly_detail[pattern_time_col].dt.hour
-            heatmap_df = anomaly_detail.groupby(["city", "hour"]).size().reset_index(name="anomaly_count")
-            fig_heatmap = px.density_heatmap(
-                heatmap_df,
-                x="hour",
-                y="city",
-                z="anomaly_count",
-                histfunc="sum",
-                title="Anomaly Pattern by City and Hour",
-                labels={"hour": "Hour", "city": "City", "anomaly_count": "Anomaly Count"},
-            )
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            col1, col2 = st.columns(2)
+            with col1:
+                rate_df = anomaly_rate_summary(pattern_df, pattern_anomaly_col)
+                if not rate_df.empty:
+                    fig_rate = px.bar(
+                        rate_df,
+                        x="city",
+                        y="anomaly_rate_pct",
+                        title="Anomaly Rate by City",
+                        labels={"city": "City", "anomaly_rate_pct": "Anomaly Rate (%)"},
+                    )
+                    st.plotly_chart(fig_rate, use_container_width=True)
+            with col2:
+                dist_df = pattern_df[["city", pattern_pm_col, pattern_anomaly_col]].dropna().copy()
+                dist_df["record_type"] = np.where(dist_df[pattern_anomaly_col], "Anomaly", "Normal")
+                fig_box = px.box(
+                    dist_df,
+                    x="record_type",
+                    y=pattern_pm_col,
+                    color="record_type",
+                    title="PM2.5 Distribution: Normal vs Anomaly",
+                    labels={pattern_pm_col: "PM2.5", "record_type": "Record Type"},
+                )
+                st.plotly_chart(fig_box, use_container_width=True)
 
-        if anomaly_detail.empty:
-            safe_box("✅ Tidak ada anomali pada filter terpilih. Tidak terlihat pola peningkatan pencemaran yang terdeteksi oleh rule/model anomali saat ini.")
-        else:
-            top_city = anomaly_detail["city"].value_counts().idxmax()
-            top_city_count = anomaly_detail["city"].value_counts().max()
-            avg_anom_pm = anomaly_detail[pattern_pm_col].mean()
-            avg_norm_pm = normal_detail[pattern_pm_col].mean() if not normal_detail.empty else np.nan
-            if pattern_time_col and pattern_time_col in anomaly_detail.columns:
-                top_hour = int(anomaly_detail[pattern_time_col].dt.hour.value_counts().idxmax())
-                hour_text = f" Anomali paling sering muncul sekitar jam <b>{top_hour:02d}:00</b>."
+            if pattern_time_col and pattern_time_col in pattern_df.columns and not anomaly_detail.empty:
+                anomaly_detail["hour"] = anomaly_detail[pattern_time_col].dt.hour
+                heatmap_df = anomaly_detail.groupby(["city", "hour"]).size().reset_index(name="anomaly_count")
+                fig_heatmap = px.density_heatmap(
+                    heatmap_df,
+                    x="hour",
+                    y="city",
+                    z="anomaly_count",
+                    histfunc="sum",
+                    title="Anomaly Pattern by City and Hour",
+                    labels={"hour": "Hour", "city": "City", "anomaly_count": "Anomaly Count"},
+                )
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+
+            render_mini_title("Jawaban Pertanyaan Analisis")
+            if anomaly_detail.empty:
+                safe_box(
+                    "✅ Pada filter yang dipilih, belum terdapat anomali yang terdeteksi. Artinya, dashboard belum menunjukkan pola peningkatan pencemaran yang kuat berdasarkan rule/model anomali saat ini."
+                )
             else:
-                hour_text = ""
-            alert_box(
-                f"⚠️ Terdapat pola anomali pada sumber <b>{source_label}</b>. Kota dengan frekuensi anomali tertinggi adalah "
-                f"<b>{top_city}</b> sebanyak <b>{top_city_count}</b> record. Rata-rata PM2.5 saat anomali adalah "
-                f"<b>{avg_anom_pm:.2f}</b>"
-                + (f", lebih tinggi dari rata-rata kondisi normal <b>{avg_norm_pm:.2f}</b>." if not pd.isna(avg_norm_pm) else ".")
-                + hour_text
-                + " Pola ini dapat mengindikasikan peningkatan tingkat pencemaran, terutama jika anomali berulang pada kota/jam yang sama."
-            )
+                top_city = anomaly_detail["city"].value_counts().idxmax()
+                top_city_count = anomaly_detail["city"].value_counts().max()
+                avg_anom_pm = anomaly_detail[pattern_pm_col].mean()
+                avg_norm_pm = normal_detail[pattern_pm_col].mean() if not normal_detail.empty else np.nan
+
+                if pattern_time_col and pattern_time_col in anomaly_detail.columns:
+                    top_hour = int(anomaly_detail[pattern_time_col].dt.hour.value_counts().idxmax())
+                    hour_text = f" Anomali paling sering muncul sekitar jam <b>{top_hour:02d}:00</b>."
+                else:
+                    hour_text = ""
+
+                alert_box(
+                    f"⚠️ <b>Ya, terdapat pola anomali yang dapat mengindikasikan peningkatan tingkat pencemaran.</b> "
+                    f"Pada sumber <b>{source_label}</b>, kota dengan frekuensi anomali tertinggi adalah "
+                    f"<b>{top_city}</b> sebanyak <b>{top_city_count}</b> record. Rata-rata PM2.5 saat anomali adalah "
+                    f"<b>{avg_anom_pm:.2f}</b>"
+                    + (f", lebih tinggi dari rata-rata kondisi normal <b>{avg_norm_pm:.2f}</b>." if not pd.isna(avg_norm_pm) else ".")
+                    + hour_text
+                    + " Pola berulang pada kota/jam tertentu dapat menjadi indikator adanya peningkatan pencemaran atau episode kualitas udara buruk."
+                )
 
     render_section("Anomaly Detail")
     anomaly_tab_batch, anomaly_tab_stream = st.tabs(["Batch Anomaly Detail", "Stream Anomaly Detail"])
