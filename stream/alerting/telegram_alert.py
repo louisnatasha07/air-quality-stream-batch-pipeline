@@ -5,12 +5,17 @@ Mengirim notifikasi real-time ke Telegram saat terdeteksi anomali
 
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, List
 from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
+WIB = timezone(timedelta(hours=7))
+
+
+def get_wib_time():
+    return datetime.now(timezone.utc).astimezone(WIB)
 
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
@@ -166,7 +171,7 @@ class TelegramAlerter:
         sorted_categories = sorted(groups.items(), key=lambda x: groups[x[0]][0]['priority'])
         
         # Build message
-        timestamp = datetime.now().strftime('%H:%M WIB')
+        timestamp = get_wib_time().strftime('%Y-%m-%d %H:%M WIB')
         total = len(self.batch_buffer)
         
         lines = [
@@ -213,7 +218,7 @@ class TelegramAlerter:
         """
         Format pesan alert individual (untuk backward compatibility)
         """
-        timestamp = payload.get('timestamp', datetime.now().isoformat())
+        timestamp = get_wib_time().strftime('%Y-%m-%d %H:%M WIB')
         city = payload.get('city', 'Unknown')
         pm25 = payload.get('pm25', 0)
         aqi = payload.get('aqi', 0)
@@ -242,7 +247,7 @@ Reason: {reason}
         message = f"""
 *DAILY AIR QUALITY SUMMARY*
 
-Date: {datetime.now().strftime('%Y-%m-%d')}
+Date: {get_wib_time().strftime('%Y-%m-%d')}
 
 PM2.5 Statistics:
   Average: {stats.get('pm25_mean', 0):.1f} μg/m³
