@@ -41,7 +41,7 @@ MESSAGE_TIMEOUT = 10  # Timeout untuk tunggu semua cities (detik)
 DB_HOST = os.getenv('POSTGRES_HOST', 'postgres_db')
 DB_PORT = os.getenv('POSTGRES_PORT', '5432')
 DB_USER = os.getenv('POSTGRES_USER', 'postgres')
-DB_PASS = os.getenv('POSTGRES_PASSWORD', 'Shantvl07')
+DB_PASS = os.getenv('POSTGRES_PASSWORD', 'pass_kamu)
 DB_NAME = os.getenv('POSTGRES_DB', 'air_quality_db')
 
 detectors = defaultdict(lambda: AnomalyDetector(window_size=20, z_threshold=3.0))
