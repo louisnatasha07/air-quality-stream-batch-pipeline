@@ -9,7 +9,7 @@ from .assets import (
     load_to_postgres,
 )
 
-from .schedules import monthly_cams_schedule
+from .schedules import batch_schedule
 
 defs = Definitions(
     assets=[
@@ -21,6 +21,6 @@ defs = Definitions(
         load_to_postgres,
     ],
     schedules=[
-        monthly_cams_schedule,
+        batch_schedule,
     ],
 )
