@@ -129,7 +129,7 @@ class StreamOrchestrator:
                 host=os.getenv('POSTGRES_HOST', 'postgres_db'),
                 port=os.getenv('POSTGRES_PORT', '5432'),
                 user=os.getenv('POSTGRES_USER', 'postgres'),
-                password=os.getenv('POSTGRES_PASSWORD', 'pass_kamu'),
+                password=os.getenv('POSTGRES_PASSWORD', 'Shantvl07'),
                 dbname=os.getenv('POSTGRES_DB', 'air_quality_db'),
                 connect_timeout=5
             )
