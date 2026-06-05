@@ -11,9 +11,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
-# ============================================================
 # PAGE CONFIG
-# ============================================================
 st.set_page_config(
     page_title="Air Quality Monitoring System",
     page_icon="🌫️",
@@ -21,9 +19,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# =========================
 # STREAMLIT PLOTLY SAFE KEY PATCH
-# =========================
 _original_plotly_chart = st.plotly_chart
 _plotly_chart_counter = 0
 
@@ -38,9 +34,7 @@ def safe_plotly_chart(*args, **kwargs):
 
 st.plotly_chart = safe_plotly_chart
 
-# ============================================================
 # CONSTANTS
-# ============================================================
 CITY_COORDS = {
     "Jakarta": {"latitude": -6.2088, "longitude": 106.8456},
     "Surakarta": {"latitude": -7.5755, "longitude": 110.8243},
@@ -59,9 +53,7 @@ QUALITY_COLOR_MAP = {
 }
 QUALITY_ORDER = ["Good", "Moderate", "Unhealthy", "Hazardous", "Unknown"]
 
-# ============================================================
 # CUSTOM STYLE
-# ============================================================
 st.markdown(
     """
     <style>
@@ -185,9 +177,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ============================================================
 # DATABASE
-# ============================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -207,9 +197,7 @@ def get_engine():
 
 engine = get_engine()
 
-# ============================================================
 # HELPERS
-# ============================================================
 def render_section(title):
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
 
@@ -548,16 +536,12 @@ def anomaly_rate_summary(df, anomaly_col):
     temp["anomaly_rate_pct"] = np.where(temp["total_records"] > 0, temp["anomaly_count"] / temp["total_records"] * 100, 0)
     return temp.sort_values("anomaly_rate_pct", ascending=False)
 
-# ============================================================
 # LOAD TABLES
-# ============================================================
 batch_summary = read_sql("SELECT * FROM city_air_quality_summary;") if table_exists("city_air_quality_summary") else pd.DataFrame()
 batch_data = read_sql("SELECT * FROM cams_air_quality_data;") if table_exists("cams_air_quality_data") else pd.DataFrame()
 stream_data = read_sql("SELECT * FROM air_quality_stream;") if table_exists("air_quality_stream") else pd.DataFrame()
 
-# ============================================================
 # COLUMN DETECTION + NORMALIZATION
-# ============================================================
 batch_time_col = find_col(batch_data, ["timestamp", "time", "datetime", "date"])
 stream_time_col = find_col(stream_data, ["timestamp", "time", "datetime", "date"])
 stream_created_col = find_col(stream_data, ["created_at"])
@@ -623,9 +607,7 @@ if not batch_data.empty and batch_time_col:
 if not stream_data.empty and STREAM_DISPLAY_TIME_COL:
     stream_data = stream_data.sort_values(["city", STREAM_DISPLAY_TIME_COL] if "city" in stream_data.columns else [STREAM_DISPLAY_TIME_COL])
 
-# ============================================================
 # HEADER
-# ============================================================
 st.markdown('<div class="main-header">Air Quality Monitoring System</div>', unsafe_allow_html=True)
 st.markdown(
     """
@@ -646,9 +628,7 @@ if table_status["row_count"].sum() == 0:
     st.warning("No data found in PostgreSQL tables. Run the batch and stream pipelines first.")
     st.stop()
 
-# ============================================================
 # TABS
-# ============================================================
 tab_overview, tab_batch, tab_stream, tab_compare, tab_anomaly, tab_data, tab_health = st.tabs(
     [
         "📌 Executive Overview",
@@ -661,9 +641,7 @@ tab_overview, tab_batch, tab_stream, tab_compare, tab_anomaly, tab_data, tab_hea
     ]
 )
 
-# ============================================================
 # TAB 1 — EXECUTIVE OVERVIEW
-# ============================================================
 with tab_overview:
     render_section("Executive Summary")
 
@@ -795,9 +773,7 @@ with tab_overview:
             f"memiliki PM2.5 tertinggi (<b>{worst_stream[stream_pm25_col]:.2f} µg/m³</b>), kategori <b>{status}</b>."
         )
 
-# ============================================================
 # TAB 2 — BATCH CAMS ANALYSIS
-# ============================================================
 with tab_batch:
     render_section("Batch CAMS Processing Output")
 
@@ -919,9 +895,7 @@ with tab_batch:
             with st.expander("View batch detail data"):
                 st.dataframe(city_batch.tail(300), use_container_width=True)
 
-# ============================================================
 # TAB 3 — REALTIME STREAM
-# ============================================================
 with tab_stream:
     render_section("Realtime Open-Meteo Stream Monitoring")
 
@@ -1066,9 +1040,7 @@ with tab_stream:
             with st.expander("View stream raw data"):
                 st.dataframe(city_stream.tail(500), use_container_width=True)
 
-# ============================================================
 # TAB 4 — BATCH VS STREAM
-# ============================================================
 with tab_compare:
     render_section("Realtime Open-Meteo vs ML Prediction")
     selected_cities, start_date, end_date = render_compare_filters(
@@ -1213,9 +1185,7 @@ with tab_compare:
                 "Karena periode sumber data berbeda, grafik ini menunjukkan integrasi dan monitoring comparison, bukan evaluasi model time-series yang strict."
             )
 
-# ============================================================
 # TAB 5 — ANOMALY CENTER
-# ============================================================
 with tab_anomaly:
     render_section("Anomaly Monitoring Center")
 
@@ -1464,9 +1434,7 @@ with tab_anomaly:
         else:
             st.info("Stream anomaly detail column is not available.")
 
-# ============================================================
 # TAB 6 — DATA EXPLORER
-# ============================================================
 with tab_data:
     render_section("Data Explorer")
     selected_dataset = st.radio("Select dataset", ["Batch Summary", "Batch Detail", "Stream Detail"], horizontal=True)
@@ -1496,9 +1464,7 @@ with tab_data:
         render_mini_title("air_quality_stream")
         st.write(get_table_columns("air_quality_stream"))
 
-# ============================================================
 # TAB 7 — SYSTEM HEALTH
-# ============================================================
 with tab_health:
     render_section("System Health and Reproducibility")
     st.markdown(
@@ -1542,9 +1508,7 @@ with tab_health:
     )
     warning_box("Security note: PostgreSQL and Kafka should remain internal. Only expose SSH, Dagster, and Streamlit dashboard ports for demo.")
 
-# ============================================================
 # FOOTER
-# ============================================================
 st.markdown(
     """
     <div class="footer-note">
