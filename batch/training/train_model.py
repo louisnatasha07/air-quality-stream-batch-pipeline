@@ -11,10 +11,7 @@ from sklearn.metrics import (
     r2_score
 )
 
-# =========================
-# PATH CONFIG
-# =========================
-
+# Path Config
 LOG_DIR = Path("logs")
 MODEL_DIR = Path("models")
 
@@ -25,20 +22,14 @@ INPUT_FILE = Path("data/processed/cams_feature_dataset.csv")
 MODEL_FILE = MODEL_DIR / "trained_model.pkl"
 METRICS_FILE = MODEL_DIR / "model_metrics.json"
 
-# =========================
-# LOGGING CONFIG
-# =========================
-
+# Logging Config
 logging.basicConfig(
     filename=LOG_DIR / "pipeline.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# =========================
-# MODEL CONFIG
-# =========================
-
+# Model Config
 FEATURES = [
     "cams_pm10",
     "hour",
